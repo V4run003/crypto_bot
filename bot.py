@@ -59,6 +59,15 @@ def main():
     _logger.info("=" * 60)
     _logger.info("Bybit Crypto Trading Bot  |  %s", mode)
     _logger.info("=" * 60)
+
+    # ── Backtest mode — runs and exits; no live trading ───────────────────────
+    if config.BACKTEST:
+        _logger.info("BACKTEST mode enabled — live trading disabled.")
+        import backtest as bt
+        for sym in config.BACKTEST_SYMBOLS:
+            bt.run_backtest(sym, config.BACKTEST_DAYS, quiet=config.BACKTEST_QUIET)
+        return
+
     sync_clock()
 
     try:

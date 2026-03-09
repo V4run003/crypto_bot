@@ -39,6 +39,14 @@ TOP_SYMBOLS_COUNT  = 30            # Top N symbols by 24h volume
 VOLUME_FILTER_USD  = 50_000_000   # Minimum 24h USD turnover
 SYMBOL_REFRESH_SECS = 1800        # Refresh symbol list every 30 minutes
 
+# ── Backtest mode ──────────────────────────────────────────────────────────
+# Set BACKTEST = True then run `python bot.py` (or `python backtest.py`).
+# Live trading is completely disabled while BACKTEST is True.
+BACKTEST         = True               # True → run backtest on startup
+BACKTEST_SYMBOLS = ["ETHUSDT"]        # Symbols to test (tested in sequence)
+BACKTEST_DAYS    = 90                  # Calendar days of history to fetch
+BACKTEST_QUIET   = False               # True → suppress per-trade output lines
+
 # Fallback symbol list used if the dynamic fetch fails
 FALLBACK_COINS = [
     "BTCUSDT",  "ETHUSDT",  "SOLUSDT",  "BNBUSDT",  "XRPUSDT",
