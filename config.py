@@ -49,9 +49,13 @@ BACKTEST_SYMBOLS = ["ETHUSDT"]        # Symbols to test (tested in sequence)
 BACKTEST_DAYS    = 90                  # Calendar days of history to fetch
 BACKTEST_QUIET   = False               # True → suppress per-trade output lines
 
-# Fallback symbol list used if the dynamic fetch fails
-FALLBACK_COINS = [
-    "BTCUSDT",  "ETHUSDT",  "SOLUSDT",  "BNBUSDT",  "XRPUSDT",
-    "LINKUSDT", "AVAXUSDT", "ADAUSDT",  "DOTUSDT",  "ATOMUSDT",
-    "NEARUSDT", "APTUSDT",  "DOGEUSDT",
+# Coins approved for live trading — only symbols with backtest profit factor > 1.1
+# Run `python backtest.py SYMBOL 90` before adding any new symbol here.
+APPROVED_COINS = [
+    "BTCUSDT",   # PF 1.27  ✓
+    "BNBUSDT",   # PF 1.14  ✓
+    "ETHUSDT",   # PF 1.07  (borderline — monitor)
 ]
+
+# Fallback if dynamic volume fetch fails — same approved list
+FALLBACK_COINS = APPROVED_COINS

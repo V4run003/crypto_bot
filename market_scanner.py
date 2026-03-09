@@ -39,14 +39,19 @@ def _fetch_symbols() -> list:
         resp    = exchange.session.get_tickers(category="linear")
         tickers = resp["result"]["list"]
 
-        # Keep only USDT-margined perps that exceed the volume threshold
+        # Only scan APPROVED_COINS that also pass the volume threshold
+        approved = set(config.APPROVED_COINS)
         candidates = [
             t for t in tickers
-            if t["symbol"].endswith("USDT")
+            if t["symbol"] in approved
             and float(t.get("turnover24h", 0)) >= config.VOLUME_FILTER_USD
         ]
         candidates.sort(key=lambda x: float(x.get("turnover24h", 0)), reverse=True)
-        symbols = [t["symbol"] for t in candidates[:config.TOP_SYMBOLS_COUNT]]
+        symbols = [t["symbol"] for t in candidates]
+
+        # If volume filter stripped everything, fall back to the full approved list
+        if not symbols:
+            symbols = list(config.APPROVED_COINS)
 
         logger.info("Selected symbols: %s", symbols)
         return symbols
@@ -55,4 +60,4 @@ def _fetch_symbols() -> list:
         logger.error(
             "Symbol discovery failed — keeping previous list. Error: %s", exc
         )
-        return _cached_symbols or config.FALLBACK_COINS
+        return _cached_symbols or list(config.FALLBACK_COINS)
