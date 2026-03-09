@@ -138,7 +138,7 @@ def _check_signal(df5, i, df1h, h_idx):
         return None, None, None, None
 
     # Volatility and trend-strength filters
-    if atr <= atr_ma or adx <= 20:
+    if atr <= atr_ma or adx <= config.ADX_THRESHOLD:
         return None, None, None, None
 
     # 1H HTF filter

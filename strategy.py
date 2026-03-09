@@ -50,7 +50,7 @@ def check_signal(candles_5m, candles_1h):
         return _no_signal(adx=adx)
 
     # Trend-strength filter
-    if adx <= 20:
+    if adx <= config.ADX_THRESHOLD:
         return _no_signal(adx=adx)
 
     # ── Long: 5m price above EMA200, 1H aligned, selling-exhaustion hook ──────
