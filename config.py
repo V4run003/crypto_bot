@@ -8,8 +8,8 @@ TESTNET    = False  # True = Bybit Testnet (testnet.bybit.com keys)
 DEMO       = True   # True = Bybit Demo Trading (bybit.com demo keys)
 
 TIMEFRAME          = 5      # Primary candle interval in minutes
-RISK_PER_TRADE     = 25     # USD risked per trade
-MAX_DAILY_LOSS     = 150    # Bot stops after this cumulative daily loss (USD)
+RISK_PER_TRADE     = 35     # USD risked per trade
+MAX_DAILY_LOSS     = 100    # Bot stops after this cumulative daily loss (USD)
 MAX_TRADES_PER_DAY = 6      # Hard cap on daily trade count
 RR                 = 1.5    # Take-profit risk:reward ratio
 
@@ -44,8 +44,8 @@ SYMBOL_REFRESH_SECS = 1800        # Refresh symbol list every 30 minutes
 # ── Backtest mode ──────────────────────────────────────────────────────────
 # Set BACKTEST = True then run `python bot.py` (or `python backtest.py`).
 # Live trading is completely disabled while BACKTEST is True.
-BACKTEST         = True               # True → run backtest on startup
-BACKTEST_SYMBOLS = ["ETHUSDT"]        # Symbols to test (tested in sequence)
+BACKTEST         = True              # True → run backtest on startup
+BACKTEST_SYMBOLS = ["BTCUSDT"]        # Symbols to test (tested in sequence)
 BACKTEST_DAYS    = 90                  # Calendar days of history to fetch
 BACKTEST_QUIET   = False               # True → suppress per-trade output lines
 
