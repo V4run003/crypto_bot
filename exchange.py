@@ -92,11 +92,22 @@ def _decimal_places(step):
 # ── Market data ─────────────────────────────────────────────────────────────
 
 def get_candles(symbol):
-    """Fetch the latest 250 candles (newest first) for a symbol."""
+    """Fetch the latest 250 5-minute candles (newest first)."""
     data = session.get_kline(
         category="linear",
         symbol=symbol,
         interval=config.TIMEFRAME,
+        limit=250,
+    )
+    return data["result"]["list"]
+
+
+def get_candles_1h(symbol):
+    """Fetch the latest 250 1-hour candles (newest first) for HTF trend filter."""
+    data = session.get_kline(
+        category="linear",
+        symbol=symbol,
+        interval=60,
         limit=250,
     )
     return data["result"]["list"]
