@@ -8,6 +8,8 @@ import exchange
 logger = logging.getLogger(__name__)
 
 _daily_loss:      float              = 0.0
+_daily_wins:      int                = 0
+_daily_losses:    int                = 0
 _trade_count:     int                = 0
 _reset_day:       object             = None
 _last_close_time: Optional[datetime] = None
@@ -47,7 +49,7 @@ def trailing_dd_remaining() -> float:
 
 def reset_if_new_day():
     """Reset daily counters when the UTC calendar day changes."""
-    global _daily_loss, _trade_count, _reset_day
+    global _daily_loss, _daily_wins, _daily_losses, _trade_count, _reset_day
     today = datetime.now(timezone.utc).date()
     if _reset_day != today:
         if _reset_day is not None:
@@ -55,9 +57,11 @@ def reset_if_new_day():
                 "UTC day rollover — daily reset.  prev loss=$%.2f  prev trades=%d",
                 _daily_loss, _trade_count,
             )
-        _daily_loss  = 0.0
-        _trade_count = 0
-        _reset_day   = today
+        _daily_loss   = 0.0
+        _daily_wins   = 0
+        _daily_losses = 0
+        _trade_count  = 0
+        _reset_day    = today
 
 
 def cooldown_remaining() -> float:
@@ -117,14 +121,20 @@ def record_trade_closed():
 
 def update_pnl(pnl: float):
     """Add a realized PnL amount (positive = profit, negative = loss)."""
-    global _daily_loss
+    global _daily_loss, _daily_wins, _daily_losses
     _daily_loss += pnl
+    if pnl > 0:
+        _daily_wins += 1
+    elif pnl < 0:
+        _daily_losses += 1
     logger.info("PnL update: $%+.2f  |  daily total: $%.2f", pnl, _daily_loss)
 
 
 def get_stats() -> dict:
     return {
         "daily_loss":       _daily_loss,
+        "daily_wins":       _daily_wins,
+        "daily_losses":     _daily_losses,
         "trade_count":      _trade_count,
         "day":              _reset_day,
         "cooldown_secs":    cooldown_remaining(),

@@ -1,6 +1,7 @@
 import time
 import logging
 import ctypes
+import traceback
 from datetime import datetime, timezone
 
 import ntplib
@@ -13,6 +14,7 @@ import exchange
 import risk
 import position_manager
 import scanner
+import telegram_bot
 
 _logger = logging.getLogger("bot")
 
@@ -68,6 +70,7 @@ def main():
             bt.run_backtest(sym, config.BACKTEST_DAYS, quiet=config.BACKTEST_QUIET)
         return
 
+    telegram_bot.start()
     sync_clock()
 
     try:
@@ -75,6 +78,8 @@ def main():
         _logger.info("Wallet balance: $%.2f USDT", balance)
     except Exception as exc:
         _logger.error("Failed to connect to exchange: %s", exc)
+        telegram_bot.notify_error("Connection Failed on Startup", str(exc))
+        telegram_bot.stop()
         return
 
     # Restore today's realized PnL so daily limits survive restarts
@@ -87,12 +92,22 @@ def main():
     position_manager.init_from_exchange()
     risk.update_peak_balance()   # establish baseline peak for trailing DD guard
 
+    s = risk.get_stats()
+    target_balance = config.ACCOUNT_SIZE * 1.10
+    profit_needed  = max(0.0, target_balance - balance)
+    telegram_bot.notify_bot_started(
+        balance=balance, peak=s["peak_balance"],
+        dd_left=s["trailing_dd_left"], profit_needed=profit_needed,
+    )
+
     _logger.info(
         "Bot running — syncing to 5m candle closes | "
         "risk $%s/trade | max loss $%s/day | cooldown %dm",
         config.RISK_PER_TRADE, config.MAX_DAILY_LOSS,
         config.TRADE_COOLDOWN_SECS // 60,
     )
+
+    _last_report_day = datetime.now(timezone.utc).date()
 
     while True:
         wait = seconds_to_next_candle()
@@ -101,9 +116,17 @@ def main():
             time.sleep(wait)
         except KeyboardInterrupt:
             _logger.info("Bot stopped by user.")
+            telegram_bot.notify_bot_stopped("User stopped bot (Ctrl+C)")
+            telegram_bot.stop()
             break
 
         try:
+            # ── Daily report at UTC midnight (before the day counter resets) ──
+            today = datetime.now(timezone.utc).date()
+            if today != _last_report_day:
+                _send_daily_report(_last_report_day)
+                _last_report_day = today
+
             utc_time = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
             s = risk.get_stats()
             _logger.info(
@@ -115,9 +138,39 @@ def main():
 
         except KeyboardInterrupt:
             _logger.info("Bot stopped by user.")
+            telegram_bot.notify_bot_stopped("User stopped bot (Ctrl+C)")
+            telegram_bot.stop()
             break
         except Exception as exc:
+            detail = traceback.format_exc()
             _logger.error("Unhandled error: %s", exc, exc_info=True)
+            telegram_bot.notify_error("Unhandled Bot Error", detail)
+
+
+def _send_daily_report(report_day):
+    """Send Telegram daily summary for `report_day` (a datetime.date)."""
+    try:
+        s = risk.get_stats()
+        try:
+            balance = exchange.get_wallet_balance()
+        except Exception:
+            balance = 0.0
+        date_str       = report_day.strftime("%a %d %b %Y")
+        target_balance = config.ACCOUNT_SIZE * 1.10
+        profit_needed  = max(0.0, target_balance - balance)
+        telegram_bot.notify_daily_report(
+            date_str=date_str,
+            trade_count=s["trade_count"],
+            wins=s["daily_wins"],
+            losses=s["daily_losses"],
+            daily_pnl=s["daily_loss"],
+            balance=balance,
+            peak=s["peak_balance"],
+            dd_left=s["trailing_dd_left"],
+            profit_needed=profit_needed,
+        )
+    except Exception as exc:
+        _logger.warning("Failed to send daily report notification: %s", exc)
 
 
 if __name__ == "__main__":

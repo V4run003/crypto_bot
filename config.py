@@ -60,6 +60,14 @@ USE_LIMIT_ENTRY          = True  # Try post-only limit before falling back to ma
 LIMIT_ORDER_TIMEOUT_SECS = 30    # Seconds to wait for limit fill
 
 CANDLE_BUFFER_SECS = 3      # Extra seconds to wait after candle close
+
+# ── Telegram notifications ────────────────────────────────────────────────────
+# Setup: message @BotFather → /newbot → copy token.
+# Then visit https://api.telegram.org/bot<TOKEN>/getUpdates after messaging
+# your bot, and copy the "id" from the "chat" object → that is TELEGRAM_CHAT_ID.
+TELEGRAM_ENABLED   = True   # Set True once you have added TELEGRAM_CHAT_ID below
+TELEGRAM_BOT_TOKEN = "8778843182:AAEJA4LeSkPCN0bHPdrRGBuG-c46MMJlpTk"
+TELEGRAM_CHAT_ID   = "7893389735"      # Paste your chat ID here, then set TELEGRAM_ENABLED = True
 SCAN_INTERVAL      = 300    # Fallback scan interval (seconds) if timing fails
 
 # Dynamic market discovery
