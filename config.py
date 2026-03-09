@@ -8,10 +8,18 @@ TESTNET    = False  # True = Bybit Testnet (testnet.bybit.com keys)
 DEMO       = True   # True = Bybit Demo Trading (bybit.com demo keys)
 
 TIMEFRAME          = 5      # Primary candle interval in minutes
-RISK_PER_TRADE     = 35     # USD risked per trade
-MAX_DAILY_LOSS     = 100    # Bot stops after this cumulative daily loss (USD)
+RISK_PER_TRADE     = 25     # USD risked per trade (0.5% of $5k — safe vs 6% trailing DD)
+MAX_DAILY_LOSS     = 180    # Bot stops at $180 daily loss (CFT limit is $200 = 4%)
 MAX_TRADES_PER_DAY = 15     # Hard cap on daily trade count (13 coins active)
 RR                 = 1.5    # Take-profit risk:reward ratio
+
+# ── CFT Prop-firm challenge rules ($5,000 account) ───────────────────────────
+ACCOUNT_SIZE          = 5000   # Starting balance
+PROFIT_TARGET         = 571    # Remaining to reach $5,500 target ($4,929 current → $5,500)
+KNOWN_PEAK_BALANCE    = 5000   # Highest balance ever seen — seeds trailing DD floor on restart
+MAX_DAILY_LOSS_PCT    = 0.04   # 4%  → $200 hard daily loss limit
+TRAILING_DD_PCT       = 0.06   # 6%  → $300 trailing drawdown from peak
+TRAILING_DD_BUFFER    = 50     # Stop trading $50 before hitting the trailing DD wall
 
 ATR_PERIOD    = 14   # ATR indicator period
 ATR_MA_PERIOD = 20   # Rolling-average period for volatility filter
@@ -43,6 +51,13 @@ MAX_MARGIN_PCT = 0.20  # Max fraction of wallet committed as margin per trade
 # Prop-firm compliance
 TRADE_COOLDOWN_SECS     = 600   # 10-minute cooldown after any trade closes
 MIN_TRADE_DURATION_SECS = 60    # Minimum seconds a trade must stay open
+
+# ── Order execution ───────────────────────────────────────────────────────────
+# Post-only limit orders pay maker fee (0.02%) vs taker (0.06%) — 3× cheaper.
+# If the limit is not filled within LIMIT_ORDER_TIMEOUT_SECS, it is cancelled
+# and a market order is sent as fallback.
+USE_LIMIT_ENTRY          = True  # Try post-only limit before falling back to market
+LIMIT_ORDER_TIMEOUT_SECS = 30    # Seconds to wait for limit fill
 
 CANDLE_BUFFER_SECS = 3      # Extra seconds to wait after candle close
 SCAN_INTERVAL      = 300    # Fallback scan interval (seconds) if timing fails

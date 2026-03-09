@@ -85,6 +85,7 @@ def main():
 
     # Sync with any positions open before this restart
     position_manager.init_from_exchange()
+    risk.update_peak_balance()   # establish baseline peak for trailing DD guard
 
     _logger.info(
         "Bot running — syncing to 5m candle closes | "
@@ -106,9 +107,9 @@ def main():
             utc_time = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
             s = risk.get_stats()
             _logger.info(
-                "─── [%s]  trades=%d/%d  daily_pnl=$%.2f  cooldown=%.0fs ───",
+                "─── [%s]  trades=%d/%d  daily_pnl=$%.2f  trailing_dd_left=$%.2f  cooldown=%.0fs ───",
                 utc_time, s["trade_count"], config.MAX_TRADES_PER_DAY,
-                s["daily_loss"], s["cooldown_secs"],
+                s["daily_loss"], s["trailing_dd_left"], s["cooldown_secs"],
             )
             scanner.scan()
 

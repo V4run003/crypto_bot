@@ -195,7 +195,22 @@ def set_leverage(symbol, leverage):
         logger.debug("set_leverage %s x%s: %s", symbol, leverage, exc)
 
 
-def place_order(symbol, side, qty, sl=None, tp=None):
+def place_order(symbol, side, qty, sl=None, tp=None, limit_price=None):
+    """
+    Place an entry order.  If USE_LIMIT_ENTRY is True and limit_price is given,
+    tries a post-only limit first (maker fee 0.02%).  If the limit is rejected
+    or not filled within LIMIT_ORDER_TIMEOUT_SECS, cancels it and falls back to
+    a market order (taker fee 0.06%).
+    """
+    if config.USE_LIMIT_ENTRY and limit_price is not None:
+        filled = _try_limit_order(symbol, side, qty, limit_price, sl, tp)
+        if filled:
+            return filled
+        logger.info("%s: limit unfilled/rejected — falling back to market", symbol)
+    return _place_market_order(symbol, side, qty, sl, tp)
+
+
+def _place_market_order(symbol, side, qty, sl=None, tp=None):
     """Place a market order with optional stop-loss and take-profit."""
     params = {
         "category":    "linear",
@@ -212,6 +227,66 @@ def place_order(symbol, side, qty, sl=None, tp=None):
         params["takeProfit"]  = str(tp)
         params["tpTriggerBy"] = "LastPrice"
     return session.place_order(**params)
+
+
+def _try_limit_order(symbol, side, qty, price, sl, tp):
+    """
+    Place a post-only limit order at `price`.  Poll until filled or timeout.
+    Returns the order response dict on fill, or None on rejection/timeout.
+    """
+    import time
+    params = {
+        "category":    "linear",
+        "symbol":      symbol,
+        "side":        side,
+        "orderType":   "Limit",
+        "qty":         str(qty),
+        "price":       str(price),
+        "timeInForce": "PostOnly",
+    }
+    if sl is not None:
+        params["stopLoss"]    = str(sl)
+        params["slTriggerBy"] = "LastPrice"
+    if tp is not None:
+        params["takeProfit"]  = str(tp)
+        params["tpTriggerBy"] = "LastPrice"
+
+    try:
+        resp     = session.place_order(**params)
+        order_id = resp["result"]["orderId"]
+        logger.info("%s: PostOnly limit placed  orderId=%s  price=%s", symbol, order_id, price)
+    except Exception as exc:
+        # PostOnly rejected immediately (would cross the spread) — skip straight to market
+        logger.info("%s: PostOnly limit rejected (%s)", symbol, exc)
+        return None
+
+    # Poll for fill
+    deadline = time.monotonic() + config.LIMIT_ORDER_TIMEOUT_SECS
+    while time.monotonic() < deadline:
+        time.sleep(3)
+        try:
+            history = session.get_order_history(
+                category="linear", symbol=symbol, orderId=order_id, limit=1
+            )
+            orders = history["result"]["list"]
+            if orders:
+                status = orders[0]["orderStatus"]
+                if status == "Filled":
+                    logger.info("%s: limit order filled (maker fee)", symbol)
+                    return orders[0]
+                if status in ("Cancelled", "Rejected", "Deactivated"):
+                    logger.info("%s: limit order %s", symbol, status)
+                    return None
+        except Exception as exc:
+            logger.warning("%s: order status poll failed: %s", symbol, exc)
+
+    # Timeout — cancel the unfilled limit then fall back
+    try:
+        session.cancel_order(category="linear", symbol=symbol, orderId=order_id)
+        logger.info("%s: limit order cancelled (timeout %ds)", symbol, config.LIMIT_ORDER_TIMEOUT_SECS)
+    except Exception as exc:
+        logger.warning("%s: cancel_order failed: %s", symbol, exc)
+    return None
 
 
 def set_trading_stop(symbol, stop_loss=None, take_profit=None):

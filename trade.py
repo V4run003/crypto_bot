@@ -46,7 +46,8 @@ def open_long(symbol, entry, sl, tp):
     if qty is None:
         logger.warning("%s: calculated qty below exchange minimum — skipping long", symbol)
         return None
-    exchange.place_order(symbol, "Buy", qty, sl=sl_r, tp=tp_r)
+    entry_r = exchange.round_price(symbol, entry)
+    exchange.place_order(symbol, "Buy", qty, sl=sl_r, tp=tp_r, limit_price=entry_r)
     logger.info(
         "LONG  opened: %s  qty=%s  entry≈%.4f  sl=%s  tp=%s  leverage=%dx  balance=$%.2f",
         symbol, qty, entry, sl_r, tp_r, config.MAX_LEVERAGE, balance,
@@ -65,7 +66,8 @@ def open_short(symbol, entry, sl, tp):
     if qty is None:
         logger.warning("%s: calculated qty below exchange minimum — skipping short", symbol)
         return None
-    exchange.place_order(symbol, "Sell", qty, sl=sl_r, tp=tp_r)
+    entry_r = exchange.round_price(symbol, entry)
+    exchange.place_order(symbol, "Sell", qty, sl=sl_r, tp=tp_r, limit_price=entry_r)
     logger.info(
         "SHORT opened: %s  qty=%s  entry≈%.4f  sl=%s  tp=%s  leverage=%dx  balance=$%.2f",
         symbol, qty, entry, sl_r, tp_r, config.MAX_LEVERAGE, balance,
