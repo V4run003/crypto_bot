@@ -12,10 +12,8 @@ build/
 config.py          # contains API keys and Telegram token
 
 # ── Scratch / output files ────────────────────────────────────────────────────
-_report_out.txt
-_screen_out.txt
-_screen_candidates_out.txt
-_screen_candidates.txt
+_*.py              # underscore-prefixed utility/report scripts
+_*.txt             # all generated text output files
 *.log
 logs/
 
