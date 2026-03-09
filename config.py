@@ -10,7 +10,7 @@ DEMO       = True   # True = Bybit Demo Trading (bybit.com demo keys)
 TIMEFRAME          = 5      # Primary candle interval in minutes
 RISK_PER_TRADE     = 35     # USD risked per trade
 MAX_DAILY_LOSS     = 100    # Bot stops after this cumulative daily loss (USD)
-MAX_TRADES_PER_DAY = 6      # Hard cap on daily trade count
+MAX_TRADES_PER_DAY = 15     # Hard cap on daily trade count (13 coins active)
 RR                 = 1.5    # Take-profit risk:reward ratio
 
 ATR_PERIOD    = 14   # ATR indicator period
@@ -55,7 +55,7 @@ SYMBOL_REFRESH_SECS = 1800        # Refresh symbol list every 30 minutes
 # ── Backtest mode ──────────────────────────────────────────────────────────
 # Set BACKTEST = True then run `python bot.py` (or `python backtest.py`).
 # Live trading is completely disabled while BACKTEST is True.
-BACKTEST         = True              # True → run backtest on startup
+BACKTEST         = False             # True → run backtest on startup
 BACKTEST_SYMBOLS = ["BTCUSDT"]        # Symbols to test (tested in sequence)
 BACKTEST_DAYS    = 90                  # Calendar days of history to fetch
 BACKTEST_QUIET   = False               # True → suppress per-trade output lines
@@ -63,9 +63,21 @@ BACKTEST_QUIET   = False               # True → suppress per-trade output line
 # Coins approved for live trading — only symbols with backtest profit factor > 1.1
 # Run `python backtest.py SYMBOL 90` before adding any new symbol here.
 APPROVED_COINS = [
-    "BTCUSDT",   # PF 1.27  ✓
-    "BNBUSDT",   # PF 1.14  ✓
-    "ETHUSDT",   # PF 1.07  (borderline — monitor)
+    # Tier 1 — PF >= 1.40 (highest confidence)
+    "GRTUSDT",   # PF 1.97  ✓  WR 56.8%
+    "PAXGUSDT",  # PF 1.94  ✓  WR 56.3%  MaxDD $140
+    "TIAUSDT",   # PF 1.61  ✓  WR 51.8%
+    "ONDOUSDT",  # PF 1.55  ✓  WR 50.8%
+    "FILUSDT",   # PF 1.44  ✓  MaxDD $140
+    "BTCUSDT",   # PF 1.41  ✓
+    "SUIUSDT",   # PF 1.41  ✓  MaxDD $140
+    "ARBUSDT",   # PF 1.41  ✓
+    "TONUSDT",   # PF 1.40  ✓
+    # Tier 2 — PF 1.25–1.39
+    "CRVUSDT",   # PF 1.32  ✓  MaxDD $140
+    "BNBUSDT",   # PF 1.27  ✓
+    "LDOUSDT",   # PF 1.28  ✓
+    "ETHUSDT",   # PF 1.20  ✓
 ]
 
 # Fallback if dynamic volume fetch fails — same approved list
