@@ -9,11 +9,13 @@ dist/
 build/
 
 # ── Secrets — NEVER commit these ─────────────────────────────────────────────
-config.py          # contains API keys and Telegram token
+# contains API keys and Telegram token
+config.py
 
 # ── Scratch / output files ────────────────────────────────────────────────────
-_*.py              # underscore-prefixed utility/report scripts
-_*.txt             # all generated text output files
+# underscore-prefixed utility/report scripts and generated text output files
+_*.py
+_*.txt
 *.log
 logs/
 
