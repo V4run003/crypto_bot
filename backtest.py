@@ -89,6 +89,7 @@ def fetch_all_candles(session, symbol, interval, days):
 def _build_5m_indicators(df):
     df = df.copy()
     df["ema200"] = ta.trend.ema_indicator(df["close"], window=200)
+    df["ema50"]  = ta.trend.ema_indicator(df["close"], window=50)
     df["adx"]    = ta.trend.adx(df["high"], df["low"], df["close"], window=14)
     df["wr"]     = ta.momentum.williams_r(
                        df["high"], df["low"], df["close"], lbp=14)
@@ -126,13 +127,16 @@ def _check_signal(df5, i, df1h, h_idx):
     if i < min_i or h_idx < 200:
         return None, None, None, None
 
-    row    = df5.iloc[i]
-    price  = row["close"]
-    ema5   = row["ema200"]
-    adx    = row["adx"]
-    atr    = row["atr"]
-    atr_ma = row["atr_ma"]
-    wr     = row["wr"]
+    row      = df5.iloc[i]
+    row_prev = df5.iloc[i - 1]
+    price    = row["close"]
+    ema5     = row["ema200"]
+    ema50    = row["ema50"]
+    adx      = row["adx"]
+    adx_prev = row_prev["adx"]
+    atr      = row["atr"]
+    atr_ma   = row["atr_ma"]
+    wr       = row["wr"]
 
     if any(pd.isna(v) for v in [price, ema5, adx, atr, atr_ma, wr]):
         return None, None, None, None
@@ -140,6 +144,21 @@ def _check_signal(df5, i, df1h, h_idx):
     # Volatility and trend-strength filters
     if atr <= atr_ma or adx <= config.ADX_THRESHOLD:
         return None, None, None, None
+
+    # ADX rising filter
+    if config.ADX_RISING_FILTER and not pd.isna(adx_prev) and adx <= adx_prev:
+        return None, None, None, None
+
+    # Time-of-day filter
+    if config.TIME_FILTER:
+        bar_hour = datetime.fromtimestamp(int(df5["timestamp"].iloc[i]) / 1000, tz=timezone.utc).hour
+        if bar_hour < config.TIME_FILTER_START or bar_hour >= config.TIME_FILTER_END:
+            return None, None, None, None
+
+    # EMA50 pullback filter
+    if config.EMA50_PULLBACK_FILTER and not pd.isna(ema50):
+        if abs(price - ema50) > config.EMA50_PULLBACK_ATR_MULT * atr:
+            return None, None, None, None
 
     # 1H HTF filter
     row_1h   = df1h.iloc[h_idx]

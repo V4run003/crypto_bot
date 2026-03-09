@@ -21,6 +21,17 @@ SL_BUFFER_PCT  = 0.001  # 0.1 % buffer beyond the swing point
 
 ADX_THRESHOLD = 18   # Minimum ADX to confirm a trending market (lower = more trades)
 
+# ── Experimental filters ──────────────────────────────────────────────────────
+# TIME_FILTER: +$963 vs +$945 baseline, PF 1.30, lower MaxDD — KEEP ON
+# ADX_RISING_FILTER: PF 1.36 but 58% fewer trades, less total PnL — OFF
+# EMA50_PULLBACK_FILTER: PF collapses to 1.01, MaxDD spikes — OFF
+ADX_RISING_FILTER        = False # ADX must be rising for momentum confirmation
+TIME_FILTER              = True  # Only trade during liquid hours
+TIME_FILTER_START        = 8     # UTC hour, inclusive (08:00)
+TIME_FILTER_END          = 20    # UTC hour, exclusive  (20:00)
+EMA50_PULLBACK_FILTER    = False # Price within N × ATR of EMA50 (kills edge, leave off)
+EMA50_PULLBACK_ATR_MULT  = 1.0   # Distance threshold multiplier
+
 # Williams %R Trend Exhaustion
 # Consecutive candles that must sit in the extreme zone before the hook fires.
 WR_EXHAUSTION_LOOKBACK = 2   # 2 = more signals, 3 = fewer but stricter

@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 import pandas as pd
 import ta
@@ -30,12 +31,15 @@ def check_signal(candles_5m, candles_1h):
         htf_short_ok = price_1h < ema_1h
 
     # ── Closed signal candle values (iloc[-2]) ────────────────────────────────
-    row    = df.iloc[-2]
-    price  = row["close"]
-    ema    = row["ema200"]
-    adx    = row["adx"]
-    atr    = row["atr"]
-    atr_ma = row["atr_ma"]
+    row      = df.iloc[-2]
+    row_prev = df.iloc[-3]   # for ADX-rising filter
+    price    = row["close"]
+    ema      = row["ema200"]
+    ema50    = row["ema50"]
+    adx      = row["adx"]
+    adx_prev = row_prev["adx"]
+    atr      = row["atr"]
+    atr_ma   = row["atr_ma"]
 
     if any(pd.isna(v) for v in [price, ema, adx, atr, atr_ma]):
         return _no_signal()
@@ -52,6 +56,23 @@ def check_signal(candles_5m, candles_1h):
     # Trend-strength filter
     if adx <= config.ADX_THRESHOLD:
         return _no_signal(adx=adx)
+
+    # ADX rising filter — momentum must be increasing
+    if config.ADX_RISING_FILTER and not pd.isna(adx_prev) and adx <= adx_prev:
+        return _no_signal(adx=adx)
+
+    # Time-of-day filter — only trade during liquid hours
+    if config.TIME_FILTER:
+        bar_hour = datetime.fromtimestamp(
+            float(row["timestamp"]) / 1000, tz=timezone.utc
+        ).hour
+        if bar_hour < config.TIME_FILTER_START or bar_hour >= config.TIME_FILTER_END:
+            return _no_signal(adx=adx)
+
+    # EMA50 pullback filter — price must be within N ATR of EMA50
+    if config.EMA50_PULLBACK_FILTER and not pd.isna(ema50):
+        if abs(price - ema50) > config.EMA50_PULLBACK_ATR_MULT * atr:
+            return _no_signal(adx=adx)
 
     # ── Long: 5m price above EMA200, 1H aligned, selling-exhaustion hook ──────
     if price > ema and htf_long_ok and _wr_exhaustion_long(df):
@@ -99,6 +120,7 @@ def _prepare_df(candles):
             df[col] = df[col].astype(float)
 
         df["ema200"] = ta.trend.ema_indicator(df["close"], window=200)
+        df["ema50"]  = ta.trend.ema_indicator(df["close"], window=50)
         df["adx"]    = ta.trend.adx(df["high"], df["low"], df["close"], window=14)
         df["wr"]     = ta.momentum.williams_r(df["high"], df["low"], df["close"], lbp=14)
         df["atr"]    = ta.volatility.average_true_range(
