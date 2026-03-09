@@ -54,8 +54,8 @@ def scan():
                 info = trade.open_long(
                     symbol, result["entry"], result["sl"], result["tp"])
                 if info:
-                    position_manager.set_trade({**info, "original_tp": result["tp"]})
                     risk.record_trade()
+                    position_manager.set_trade({**info, "original_tp": result["tp"]})
                     logger.info("Opening LONG %s", symbol)
                     break
 
@@ -64,8 +64,8 @@ def scan():
                 info = trade.open_short(
                     symbol, result["entry"], result["sl"], result["tp"])
                 if info:
-                    position_manager.set_trade({**info, "original_tp": result["tp"]})
                     risk.record_trade()
+                    position_manager.set_trade({**info, "original_tp": result["tp"]})
                     logger.info("Opening SHORT %s", symbol)
                     break
 

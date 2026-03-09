@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# COPY THIS FILE TO config.py AND FILL IN YOUR VALUES
+# config.py is gitignored and will never be committed.
+# ---------------------------------------------------------------------------
+
+API_KEY    = "YOUR_BYBIT_API_KEY"
+API_SECRET = "YOUR_BYBIT_API_SECRET"
+TESTNET    = False  # True = Bybit Testnet
+DEMO       = True   # True = Bybit Demo Trading (CFT evaluation uses demo=True)
+
+TIMEFRAME          = 5
+RISK_PER_TRADE     = 25
+MAX_DAILY_LOSS     = 180
+MAX_TRADES_PER_DAY = 7
+RR                 = 1.5
+
+ACCOUNT_SIZE          = 5000
+PROFIT_TARGET         = 500
+KNOWN_PEAK_BALANCE    = 5000
+MAX_DAILY_LOSS_PCT    = 0.04
+TRAILING_DD_PCT       = 0.06
+TRAILING_DD_BUFFER    = 50
+
+ATR_PERIOD    = 14
+ATR_MA_PERIOD = 20
+SWING_LOOKBACK = 10
+SL_BUFFER_PCT  = 0.001
+ADX_THRESHOLD = 18
+
+ADX_RISING_FILTER        = False
+TIME_FILTER              = True
+TIME_FILTER_START        = 8
+TIME_FILTER_END          = 20
+EMA50_PULLBACK_FILTER    = False
+EMA50_PULLBACK_ATR_MULT  = 1.0
+
+WR_EXHAUSTION_LOOKBACK = 2
+
+MAX_LEVERAGE   = 5
+MAX_MARGIN_PCT = 0.20
+
+TRADE_COOLDOWN_SECS     = 600
+MIN_TRADE_DURATION_SECS = 60
+
+USE_LIMIT_ENTRY          = True
+LIMIT_ORDER_TIMEOUT_SECS = 30
+
+CANDLE_BUFFER_SECS = 3
+
+TELEGRAM_ENABLED   = False
+TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+TELEGRAM_CHAT_ID   = "YOUR_TELEGRAM_CHAT_ID"
+
+SCAN_INTERVAL      = 300
+TOP_SYMBOLS_COUNT  = 30
+VOLUME_FILTER_USD  = 50_000_000
+SYMBOL_REFRESH_SECS = 1800
+
+BACKTEST         = False
+BACKTEST_SYMBOLS = ["BTCUSDT"]
+BACKTEST_DAYS    = 90
+BACKTEST_QUIET   = False
+
+APPROVED_COINS = [
+    "GRTUSDT",
+    "PAXGUSDT",
+    "ZECUSDT",
+    "TIAUSDT",
+    "SUIUSDT",
+    "TONUSDT",
+    "BNBUSDT",
+    "CRVUSDT",
+    "BTCUSDT",
+    "ETHUSDT",
+]
+FALLBACK_COINS = APPROVED_COINS
