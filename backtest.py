@@ -31,14 +31,20 @@ logging.basicConfig(level=logging.WARNING)   # suppress library noise during bac
 # ── Historical data fetching ──────────────────────────────────────────────────
 
 def _fetch_chunk(session, symbol, interval, end_ms, limit=1000):
-    resp = session.get_kline(
-        category="linear",
-        symbol=symbol,
-        interval=interval,
-        limit=limit,
-        end=end_ms,
-    )
-    return resp["result"]["list"]   # newest first
+    for attempt in range(5):
+        try:
+            resp = session.get_kline(
+                category="linear",
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+                end=end_ms,
+            )
+            return resp["result"]["list"]   # newest first
+        except Exception:
+            if attempt == 4:
+                raise
+            time.sleep(3 * (attempt + 1))
 
 
 def fetch_all_candles(session, symbol, interval, days):

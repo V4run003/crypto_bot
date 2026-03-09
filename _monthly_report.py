@@ -3,15 +3,16 @@ import backtest
 from collections import defaultdict
 
 COINS = [
-    "GRTUSDT","PAXGUSDT","TIAUSDT","ONDOUSDT","FILUSDT",
-    "BTCUSDT","SUIUSDT","ARBUSDT","TONUSDT",
-    "CRVUSDT","BNBUSDT","LDOUSDT","ETHUSDT",
+    "GRTUSDT","PAXGUSDT","ZECUSDT","TIAUSDT","SUIUSDT",
+    "TONUSDT","BNBUSDT","CRVUSDT","BTCUSDT","ETHUSDT",
 ]
 
 all_trades = []
 per_coin = {}
+DAYS = 90
+
 for sym in COINS:
-    t = backtest.run_backtest(sym, 90, quiet=True)
+    t = backtest.run_backtest(sym, DAYS, quiet=True)
     per_coin[sym] = t
     all_trades.extend(t)
 
@@ -63,32 +64,33 @@ def stats(trades):
 W = 80
 print()
 print("=" * W)
-print("  PER-COIN  |  90 days  |  RR=1.5  |  $25/trade  |  UTC 08-20")
+print(f"  PER-COIN  |  {DAYS} days  |  RR=1.5  |  $25/trade  |  UTC 08-20")
 print("=" * W)
 print(f"  {'Symbol':<12} {'Trades/mo':>9} {'WR':>6} {'PF':>5} {'Net/mo':>9} {'AvgWin':>8} {'MaxDD':>8} {'MaxStrk':>8}")
 print("  " + "-" * 78)
+MO_DIV = DAYS / 30
 for sym in COINS:
     s = stats(per_coin[sym])
     if not s:
         print(f"  {sym:<12}  no trades")
         continue
-    t_mo   = s["n"] / 3
-    net_mo = s["net"] / 3
+    t_mo   = s["n"] / MO_DIV
+    net_mo = s["net"] / MO_DIV
     print(f"  {sym:<12} {t_mo:>9.1f} {s['wr']:>5.1f}% {s['pf']:>5.2f} {net_mo:>+9.2f} {s['avg_w']:>+8.2f} {s['mdd']:>8.2f} {s['ms']:>8}")
 
 print()
 print("=" * W)
-print("  COMBINED  |  all 13 coins  |  90 days")
+print(f"  COMBINED  |  all 13 coins  |  {DAYS} days")
 print("=" * W)
 s = stats(all_trades)
-mo_trades  = s["n"] / 3
-mo_net     = s["net"] / 3
+mo_trades  = s["n"] / MO_DIV
+mo_net     = s["net"] / MO_DIV
 mo_fees_mk = mo_trades * 3.00   # $3.00 market round-trip (0.06% each way)
 mo_fees_lm = mo_trades * 1.20   # $1.20 limit round-trip  (blended ~0.024%)
-print(f"  Total trades 90d : {s['n']}  ({mo_trades:.0f}/month)")
+print(f"  Total trades {DAYS}d : {s['n']}  ({mo_trades:.0f}/month)")
 print(f"  Win rate         : {s['wr']:.1f}%")
 print(f"  Profit factor    : {s['pf']:.2f}")
-print(f"  Net PnL 90d      : ${s['net']:+.2f}  (avg/month: ${mo_net:+.2f})")
+print(f"  Net PnL {DAYS}d     : ${s['net']:+.2f}  (avg/month: ${mo_net:+.2f})")
 print(f"  Avg win          : ${s['avg_w']:+.2f}   Avg loss: -${s['avg_l']:.2f}")
 print(f"  Max drawdown     : ${s['mdd']:.2f}")
 print(f"  Max loss streak  : {s['ms']} trades")

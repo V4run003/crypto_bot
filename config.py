@@ -10,7 +10,7 @@ DEMO       = True   # True = Bybit Demo Trading (bybit.com demo keys)
 TIMEFRAME          = 5      # Primary candle interval in minutes
 RISK_PER_TRADE     = 25     # USD risked per trade (0.5% of $5k — safe vs 6% trailing DD)
 MAX_DAILY_LOSS     = 180    # Bot stops at $180 daily loss (CFT limit is $200 = 4%)
-MAX_TRADES_PER_DAY = 15     # Hard cap on daily trade count (13 coins active)
+MAX_TRADES_PER_DAY = 7    # Hard cap on daily trade count (13 coins active)
 RR                 = 1.5    # Take-profit risk:reward ratio
 
 # ── CFT Prop-firm challenge rules ($5,000 account) ───────────────────────────
@@ -78,21 +78,18 @@ BACKTEST_QUIET   = False               # True → suppress per-trade output line
 # Coins approved for live trading — only symbols with backtest profit factor > 1.1
 # Run `python backtest.py SYMBOL 90` before adding any new symbol here.
 APPROVED_COINS = [
-    # Tier 1 — PF >= 1.40 (highest confidence)
-    "GRTUSDT",   # PF 1.97  ✓  WR 56.8%
-    "PAXGUSDT",  # PF 1.94  ✓  WR 56.3%  MaxDD $140
-    "TIAUSDT",   # PF 1.61  ✓  WR 51.8%
-    "ONDOUSDT",  # PF 1.55  ✓  WR 50.8%
-    "FILUSDT",   # PF 1.44  ✓  MaxDD $140
-    "BTCUSDT",   # PF 1.41  ✓
-    "SUIUSDT",   # PF 1.41  ✓  MaxDD $140
-    "ARBUSDT",   # PF 1.41  ✓
-    "TONUSDT",   # PF 1.40  ✓
-    # Tier 2 — PF 1.25–1.39
-    "CRVUSDT",   # PF 1.32  ✓  MaxDD $140
-    "BNBUSDT",   # PF 1.27  ✓
-    "LDOUSDT",   # PF 1.28  ✓
-    "ETHUSDT",   # PF 1.20  ✓
+    # Tier 1 — PF >= 1.40 (180d verified)
+    "GRTUSDT",   # PF 1.42  WR 48.7%  MaxDD $200
+    "PAXGUSDT",  # PF 1.46  WR 49.3%  MaxDD $250
+    "ZECUSDT",   # PF 1.48  WR 49.6%  MaxDD $250
+    "TIAUSDT",   # PF 1.30  WR 46.5%  MaxDD $188
+    "SUIUSDT",   # PF 1.41  WR 48.4%  MaxDD $138
+    "TONUSDT",   # PF 1.40  WR 48.3%  MaxDD $163
+    # Tier 2 — PF 1.15–1.39 (180d verified)
+    "BNBUSDT",   # PF 1.37  WR 47.8%  MaxDD $138
+    "CRVUSDT",   # PF 1.27  WR 45.8%  MaxDD $175
+    "BTCUSDT",   # PF 1.16  WR 43.6%  MaxDD $425
+    "ETHUSDT",   # PF 1.15  WR 43.3%  MaxDD $188
 ]
 
 # Fallback if dynamic volume fetch fails — same approved list
