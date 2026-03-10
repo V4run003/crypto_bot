@@ -109,10 +109,11 @@ def _build_5m_indicators(df):
     df["adx"]    = ta.trend.adx(df["high"], df["low"], df["close"], window=14)
     df["wr"]     = ta.momentum.williams_r(df["high"], df["low"], df["close"], lbp=14)
     df["rsi"]    = ta.momentum.rsi(df["close"], window=config.RSI_PERIOD)
-    df["atr"]    = ta.volatility.average_true_range(
-                       df["high"], df["low"], df["close"],
-                       window=config.ATR_PERIOD)
-    df["atr_ma"] = df["atr"].rolling(config.ATR_MA_PERIOD).mean()
+    df["atr"]      = ta.volatility.average_true_range(
+                         df["high"], df["low"], df["close"],
+                         window=config.ATR_PERIOD)
+    df["atr_ma"]   = df["atr"].rolling(config.ATR_MA_PERIOD).mean()
+    df["vol_ma20"] = df["volume"].rolling(20).mean()
     return df
 
 
@@ -155,6 +156,12 @@ def _passes_common_filters(df5, i, df1h, h_idx):
     if config.ADX_RISING_FILTER and not pd.isna(adx_prev) and adx <= adx_prev:
         return False, None, None, None, None, None
 
+    if config.ADX_RISING2_FILTER:
+        adx_prev2 = df5.iloc[i - 2]["adx"]
+        if not (not pd.isna(adx_prev) and not pd.isna(adx_prev2)
+                and adx > adx_prev and adx_prev > adx_prev2):
+            return False, None, None, None, None, None
+
     if config.TIME_FILTER:
         bar_hour = datetime.fromtimestamp(
             int(df5["timestamp"].iloc[i]) / 1000, tz=timezone.utc
@@ -164,6 +171,13 @@ def _passes_common_filters(df5, i, df1h, h_idx):
 
     if config.EMA50_PULLBACK_FILTER and not pd.isna(ema50):
         if abs(price - ema50) > config.EMA50_PULLBACK_ATR_MULT * atr:
+            return False, None, None, None, None, None
+
+    # Volume confirmation — hook candle must have above-average volume
+    if config.VOLUME_CONFIRM_FILTER:
+        vol    = df5.iloc[i]["volume"]
+        vol_ma = df5.iloc[i]["vol_ma20"]
+        if not pd.isna(vol_ma) and vol < vol_ma * config.VOLUME_CONFIRM_MULT:
             return False, None, None, None, None, None
 
     # 1H HTF filter
@@ -198,6 +212,11 @@ def _check_rsi_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
             and rsi > rsi_prev):
         if config.CANDLE_CONFIRM_FILTER and price <= prev_high:
             return None, None, None, None
+        if config.RESISTANCE_FILTER:
+            _atr = df5.iloc[i]["atr"]
+            recent_high = float(df5["high"].iloc[max(0, i - 20) : i].max())
+            if not pd.isna(_atr) and price > recent_high - config.RESISTANCE_ATR_MULT * _atr:
+                return None, None, None, None  # too close to resistance
         swing_low = float(df5["low"].iloc[i - sw + 1 : i + 1].min())
         sl = swing_low * (1 - config.SL_BUFFER_PCT)
         sl_dist = price - sl
@@ -210,6 +229,11 @@ def _check_rsi_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
             and rsi < rsi_prev):
         if config.CANDLE_CONFIRM_FILTER and price >= prev_low:
             return None, None, None, None
+        if config.RESISTANCE_FILTER:
+            _atr = df5.iloc[i]["atr"]
+            recent_low = float(df5["low"].iloc[max(0, i - 20) : i].min())
+            if not pd.isna(_atr) and price < recent_low + config.RESISTANCE_ATR_MULT * _atr:
+                return None, None, None, None  # too close to support
         swing_high = float(df5["high"].iloc[i - sw + 1 : i + 1].max())
         sl = swing_high * (1 + config.SL_BUFFER_PCT)
         sl_dist = sl - price
@@ -238,6 +262,11 @@ def _check_wr_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
         if (prev_wr < -80).sum() >= lb:
             if config.CANDLE_CONFIRM_FILTER and price <= prev_high:
                 return None, None, None, None
+            if config.RESISTANCE_FILTER:
+                _atr = df5.iloc[i]["atr"]
+                recent_high = float(df5["high"].iloc[max(0, i - 20) : i].max())
+                if not pd.isna(_atr) and price > recent_high - config.RESISTANCE_ATR_MULT * _atr:
+                    return None, None, None, None  # too close to resistance
             swing_low = float(df5["low"].iloc[i - sw + 1 : i + 1].min())
             sl = swing_low * (1 - config.SL_BUFFER_PCT)
             sl_dist = price - sl
@@ -250,6 +279,11 @@ def _check_wr_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
         if (prev_wr > -20).sum() >= lb:
             if config.CANDLE_CONFIRM_FILTER and price >= prev_low:
                 return None, None, None, None
+            if config.RESISTANCE_FILTER:
+                _atr = df5.iloc[i]["atr"]
+                recent_low = float(df5["low"].iloc[max(0, i - 20) : i].min())
+                if not pd.isna(_atr) and price < recent_low + config.RESISTANCE_ATR_MULT * _atr:
+                    return None, None, None, None  # too close to support
             swing_high = float(df5["high"].iloc[i - sw + 1 : i + 1].max())
             sl = swing_high * (1 + config.SL_BUFFER_PCT)
             sl_dist = sl - price
@@ -332,33 +366,111 @@ def run_backtest(symbol, days, quiet=False):
         result   = None
         exit_idx = None
         exit_px  = None
+        pnl_usd  = 0.0
 
-        for j in range(i + 1, min(i + 2000, len(df5))):
-            hi = df5.iloc[j]["high"]
-            lo = df5.iloc[j]["low"]
+        sl_dist = abs(entry - sl)
 
-            if sig == "long":
-                if lo <= sl:
-                    result, exit_px, exit_idx = "loss", sl, j
-                    break
-                if hi >= tp:
-                    result, exit_px, exit_idx = "win", tp, j
-                    break
-            else:
-                if hi >= sl:
-                    result, exit_px, exit_idx = "loss", sl, j
-                    break
-                if lo <= tp:
-                    result, exit_px, exit_idx = "win", tp, j
-                    break
+        if config.PARTIAL_TP_ENABLED and sl_dist > 0:
+            # ── Phase 1: wait for partial TP1 or original SL ─────────────────
+            partial_tp1 = (entry + sl_dist * config.PARTIAL_TP1_R) if sig == "long" \
+                     else (entry - sl_dist * config.PARTIAL_TP1_R)
+            partial_tp2 = (entry + sl_dist * config.PARTIAL_TP2_R) if sig == "long" \
+                     else (entry - sl_dist * config.PARTIAL_TP2_R)
+            be_sl       = entry   # break-even stop
+
+            phase1_hit = False
+            for j in range(i + 1, min(i + 2000, len(df5))):
+                hi = df5.iloc[j]["high"]
+                lo = df5.iloc[j]["low"]
+                if sig == "long":
+                    if lo <= sl:
+                        result, exit_px, exit_idx = "loss", sl, j
+                        pnl_usd = -config.RISK_PER_TRADE
+                        break
+                    if hi >= partial_tp1:
+                        phase1_hit = True
+                        phase1_idx = j
+                        break
+                else:
+                    if hi >= sl:
+                        result, exit_px, exit_idx = "loss", sl, j
+                        pnl_usd = -config.RISK_PER_TRADE
+                        break
+                    if lo <= partial_tp1:
+                        phase1_hit = True
+                        phase1_idx = j
+                        break
+
+            if phase1_hit:
+                # First half locked in at PARTIAL_TP1_R
+                # Phase 2: wait for TP2 or break-even stop
+                for j in range(phase1_idx, min(phase1_idx + 2000, len(df5))):
+                    hi = df5.iloc[j]["high"]
+                    lo = df5.iloc[j]["low"]
+                    if sig == "long":
+                        if lo <= be_sl:
+                            # Second half stopped at BE — only first half profit
+                            result  = "win"
+                            exit_px = partial_tp1  # effective blended price
+                            pnl_usd = config.RISK_PER_TRADE * config.PARTIAL_TP1_R * 0.5
+                            exit_idx = j
+                            break
+                        if hi >= partial_tp2:
+                            result  = "win"
+                            exit_px = partial_tp2
+                            pnl_usd = (config.RISK_PER_TRADE * config.PARTIAL_TP1_R * 0.5
+                                       + config.RISK_PER_TRADE * config.PARTIAL_TP2_R * 0.5)
+                            exit_idx = j
+                            break
+                    else:
+                        if hi >= be_sl:
+                            result  = "win"
+                            exit_px = partial_tp1
+                            pnl_usd = config.RISK_PER_TRADE * config.PARTIAL_TP1_R * 0.5
+                            exit_idx = j
+                            break
+                        if lo <= partial_tp2:
+                            result  = "win"
+                            exit_px = partial_tp2
+                            pnl_usd = (config.RISK_PER_TRADE * config.PARTIAL_TP1_R * 0.5
+                                       + config.RISK_PER_TRADE * config.PARTIAL_TP2_R * 0.5)
+                            exit_idx = j
+                            break
+                else:
+                    result = None  # timed out in phase 2
+
+        else:
+            # ── Original fixed TP logic ──────────────────────────────────────
+            for j in range(i + 1, min(i + 2000, len(df5))):
+                hi = df5.iloc[j]["high"]
+                lo = df5.iloc[j]["low"]
+
+                if sig == "long":
+                    if lo <= sl:
+                        result, exit_px, exit_idx = "loss", sl, j
+                        break
+                    if hi >= tp:
+                        result, exit_px, exit_idx = "win", tp, j
+                        break
+                else:
+                    if hi >= sl:
+                        result, exit_px, exit_idx = "loss", sl, j
+                        break
+                    if lo <= tp:
+                        result, exit_px, exit_idx = "win", tp, j
+                        break
 
         if result is None:
             continue
 
-        sl_dist  = abs(entry - sl)
-        pnl_pts  = (exit_px - entry) if sig == "long" else (entry - exit_px)
-        rr_achvd = pnl_pts / sl_dist if sl_dist > 0 else 0
-        pnl_usd  = config.RISK_PER_TRADE * rr_achvd
+        if not config.PARTIAL_TP_ENABLED:
+            # Standard mode: derive PnL from exit price
+            pnl_pts  = (exit_px - entry) if sig == "long" else (entry - exit_px)
+            rr_achvd = pnl_pts / sl_dist if sl_dist > 0 else 0
+            pnl_usd  = config.RISK_PER_TRADE * rr_achvd
+        else:
+            # Partial TP mode: pnl_usd was computed directly in the loop above
+            rr_achvd = pnl_usd / config.RISK_PER_TRADE if config.RISK_PER_TRADE > 0 else 0
 
         if strat == "RSI":
             rsi_count += 1

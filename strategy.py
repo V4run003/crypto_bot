@@ -61,6 +61,13 @@ def check_signal(candles_5m, candles_1h):
     if config.ADX_RISING_FILTER and not pd.isna(adx_prev) and adx <= adx_prev:
         return _no_signal(adx=adx)
 
+    # ADX rising 2-candle filter — stricter momentum confirmation
+    if config.ADX_RISING2_FILTER:
+        adx_prev2 = df.iloc[-4]["adx"]
+        if not (not pd.isna(adx_prev) and not pd.isna(adx_prev2)
+                and adx > adx_prev and adx_prev > adx_prev2):
+            return _no_signal(adx=adx)
+
     # Time-of-day filter — only trade during liquid hours
     if config.TIME_FILTER:
         bar_hour = datetime.fromtimestamp(
@@ -74,6 +81,12 @@ def check_signal(candles_5m, candles_1h):
         if abs(price - ema50) > config.EMA50_PULLBACK_ATR_MULT * atr:
             return _no_signal(adx=adx)
 
+    # Volume confirmation — hook candle must have above-average volume
+    if config.VOLUME_CONFIRM_FILTER:
+        vol_ma = row["vol_ma20"]
+        if not pd.isna(vol_ma) and row["volume"] < vol_ma * config.VOLUME_CONFIRM_MULT:
+            return _no_signal(adx=adx)
+
     prev_high = float(df["high"].iloc[-3])
     prev_low  = float(df["low"].iloc[-3])
 
@@ -81,6 +94,10 @@ def check_signal(candles_5m, candles_1h):
     if price > ema and htf_long_ok and _wr_exhaustion_long(df):
         if config.CANDLE_CONFIRM_FILTER and price <= prev_high:
             return _no_signal(adx=adx)   # candle hasn't broken above prev high yet
+        if config.RESISTANCE_FILTER:
+            recent_high = float(df["high"].iloc[-22:-2].max())
+            if price > recent_high - config.RESISTANCE_ATR_MULT * atr:
+                return _no_signal(adx=adx)   # too close to resistance
         swing_low = float(df["low"].iloc[-(config.SWING_LOOKBACK + 1):-1].min())
         sl        = swing_low * (1 - config.SL_BUFFER_PCT)
         sl_dist   = price - sl
@@ -94,6 +111,10 @@ def check_signal(candles_5m, candles_1h):
     if price < ema and htf_short_ok and _wr_exhaustion_short(df):
         if config.CANDLE_CONFIRM_FILTER and price >= prev_low:
             return _no_signal(adx=adx)   # candle hasn't broken below prev low yet
+        if config.RESISTANCE_FILTER:
+            recent_low = float(df["low"].iloc[-22:-2].min())
+            if price < recent_low + config.RESISTANCE_ATR_MULT * atr:
+                return _no_signal(adx=adx)   # too close to support
         swing_high = float(df["high"].iloc[-(config.SWING_LOOKBACK + 1):-1].max())
         sl         = swing_high * (1 + config.SL_BUFFER_PCT)
         sl_dist    = sl - price
@@ -129,10 +150,11 @@ def _prepare_df(candles):
         df["ema200"] = ta.trend.ema_indicator(df["close"], window=200)
         df["ema50"]  = ta.trend.ema_indicator(df["close"], window=50)
         df["adx"]    = ta.trend.adx(df["high"], df["low"], df["close"], window=14)
-        df["wr"]     = ta.momentum.williams_r(df["high"], df["low"], df["close"], lbp=14)
-        df["atr"]    = ta.volatility.average_true_range(
-                           df["high"], df["low"], df["close"], window=config.ATR_PERIOD)
-        df["atr_ma"] = df["atr"].rolling(config.ATR_MA_PERIOD).mean()
+        df["wr"]       = ta.momentum.williams_r(df["high"], df["low"], df["close"], lbp=14)
+        df["atr"]      = ta.volatility.average_true_range(
+                             df["high"], df["low"], df["close"], window=config.ATR_PERIOD)
+        df["atr_ma"]   = df["atr"].rolling(config.ATR_MA_PERIOD).mean()
+        df["vol_ma20"] = df["volume"].rolling(20).mean()
         return df
     except Exception as exc:
         logger.error("_prepare_df error: %s", exc)
