@@ -120,6 +120,22 @@ def notify_bot_stopped(reason: str):
     )
 
 
+def notify_window_opened():
+    send(
+        f"🟡 <b>TRADING WINDOW OPEN</b>  —  {_ts()}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"Active until {config.TIME_FILTER_END:02d}:00 UTC\n"
+    )
+
+
+def notify_window_closed():
+    send(
+        f"🔵 <b>TRADING WINDOW CLOSED</b>  —  {_ts()}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"Next open: {config.TIME_FILTER_START:02d}:00 UTC\n"
+    )
+
+
 def notify_trade_opened(
     symbol: str, side: str, entry: float,
     sl: float, tp: float, qty: float,

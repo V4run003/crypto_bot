@@ -107,7 +107,13 @@ def main():
         config.TRADE_COOLDOWN_SECS // 60,
     )
 
-    _last_report_day = datetime.now(timezone.utc).date()
+    # True when we are currently inside the trading window (08-22 UTC).
+    # Initialised to the actual current state so we don't double-fire on start.
+    _window_open = (
+        config.TIME_FILTER_START
+        <= datetime.now(timezone.utc).hour
+        < config.TIME_FILTER_END
+    )
 
     while True:
         wait = seconds_to_next_candle()
@@ -121,13 +127,22 @@ def main():
             break
 
         try:
-            # ── Daily report at UTC midnight (before the day counter resets) ──
-            today = datetime.now(timezone.utc).date()
-            if today != _last_report_day:
-                _send_daily_report(_last_report_day)
-                _last_report_day = today
+            # ── Trading window open / close notifications ─────────────────────
+            now_utc   = datetime.now(timezone.utc)
+            in_window = (
+                config.TIME_FILTER_START <= now_utc.hour < config.TIME_FILTER_END
+            )
+            if in_window and not _window_open:
+                _window_open = True
+                _logger.info("Trading window opened (%02d:00 UTC)", config.TIME_FILTER_START)
+                telegram_bot.notify_window_opened()
+            elif not in_window and _window_open:
+                _window_open = False
+                _logger.info("Trading window closed (%02d:00 UTC)", config.TIME_FILTER_END)
+                telegram_bot.notify_window_closed()
+                _send_daily_report(now_utc.date())
 
-            utc_time = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+            utc_time = now_utc.strftime("%H:%M:%S UTC")
             s = risk.get_stats()
             _logger.info(
                 "─── [%s]  trades=%d/%d  daily_pnl=$%.2f  trailing_dd_left=$%.2f  cooldown=%.0fs ───",
