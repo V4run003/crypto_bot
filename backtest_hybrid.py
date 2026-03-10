@@ -40,11 +40,24 @@ def _fetch_chunk(session, symbol, interval, end_ms, limit=1000):
                 limit=limit,
                 end=end_ms,
             )
+            # Bybit rate-limit response: retCode 10006 ("Too many visits")
+            if resp.get("retCode", 0) == 10006:
+                wait = 20 * (attempt + 1)
+                print(f"\n  [rate-limit] 10006 — sleeping {wait}s ...", end="", flush=True)
+                time.sleep(wait)
+                continue
             return resp["result"]["list"]
-        except Exception:
-            if attempt == 4:
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "10006" in msg or "429" in msg or "rate limit" in msg or "too many" in msg:
+                wait = 20 * (attempt + 1)
+                print(f"\n  [rate-limit] {exc} — sleeping {wait}s ...", end="", flush=True)
+                time.sleep(wait)
+            elif attempt == 4:
                 raise
-            time.sleep(3 * (attempt + 1))
+            else:
+                time.sleep(3 * (attempt + 1))
+    raise RuntimeError("_fetch_chunk: still rate-limited after 5 attempts")
 
 
 def fetch_all_candles(session, symbol, interval, days):
@@ -65,7 +78,7 @@ def fetch_all_candles(session, symbol, interval, days):
         if oldest_ts <= start_ms:
             break
         end_ms = oldest_ts - 1
-        time.sleep(0.05)
+        time.sleep(0.12)  # ≈8 req/s — stays under Bybit's 10 req/s public limit
 
     print(f" {len(rows)} candles")
 
