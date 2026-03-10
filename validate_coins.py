@@ -107,7 +107,7 @@ def main():
     print(f"\nValidating {total} APPROVED_COINS over {days} days")
     print(f"Rate limiting: {getattr(backtest_hybrid, 'INTER_CHUNK_SLEEP', 0.12):.2f}s/chunk"
           f"  {inter_coin_delay}s between coins")
-    print(f"Pass criteria: PF ≥ {PF_PASS}  AND  MaxDD ≤ ${DD_PASS:.0f}\n")
+    print(f"Pass criteria: PF >= {PF_PASS}  AND  MaxDD <= ${DD_PASS:.0f}\n")
 
     for idx, sym in enumerate(coins, 1):
         print(f"[{idx:2d}/{total}] {sym}", flush=True)
