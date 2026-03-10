@@ -182,17 +182,22 @@ def _passes_common_filters(df5, i, df1h, h_idx):
 # ── RSI signal ────────────────────────────────────────────────────────────────
 
 def _check_rsi_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
-    sw      = config.SWING_LOOKBACK
-    rsi     = df5.iloc[i]["rsi"]
+    sw       = config.SWING_LOOKBACK
+    rsi      = df5.iloc[i]["rsi"]
     rsi_prev = df5.iloc[i - 1]["rsi"]
 
     if pd.isna(rsi) or pd.isna(rsi_prev):
         return None, None, None, None
 
+    prev_high = df5.iloc[i - 1]["high"]
+    prev_low  = df5.iloc[i - 1]["low"]
+
     # Long
     if (price > ema5 and htf_long_ok
             and config.RSI_LONG_ZONE_LOW <= rsi <= config.RSI_LONG_ZONE_HIGH
             and rsi > rsi_prev):
+        if config.CANDLE_CONFIRM_FILTER and price <= prev_high:
+            return None, None, None, None
         swing_low = float(df5["low"].iloc[i - sw + 1 : i + 1].min())
         sl = swing_low * (1 - config.SL_BUFFER_PCT)
         sl_dist = price - sl
@@ -203,6 +208,8 @@ def _check_rsi_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
     if (price < ema5 and htf_short_ok
             and config.RSI_SHORT_ZONE_LOW <= rsi <= config.RSI_SHORT_ZONE_HIGH
             and rsi < rsi_prev):
+        if config.CANDLE_CONFIRM_FILTER and price >= prev_low:
+            return None, None, None, None
         swing_high = float(df5["high"].iloc[i - sw + 1 : i + 1].max())
         sl = swing_high * (1 + config.SL_BUFFER_PCT)
         sl_dist = sl - price
@@ -222,10 +229,15 @@ def _check_wr_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
     if pd.isna(wr):
         return None, None, None, None
 
+    prev_high = df5.iloc[i - 1]["high"]
+    prev_low  = df5.iloc[i - 1]["low"]
+
     # Long
     if price > ema5 and htf_long_ok and wr > -80:
         prev_wr = df5["wr"].iloc[i - lb : i]
         if (prev_wr < -80).sum() >= lb:
+            if config.CANDLE_CONFIRM_FILTER and price <= prev_high:
+                return None, None, None, None
             swing_low = float(df5["low"].iloc[i - sw + 1 : i + 1].min())
             sl = swing_low * (1 - config.SL_BUFFER_PCT)
             sl_dist = price - sl
@@ -236,6 +248,8 @@ def _check_wr_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
     if price < ema5 and htf_short_ok and wr < -20:
         prev_wr = df5["wr"].iloc[i - lb : i]
         if (prev_wr > -20).sum() >= lb:
+            if config.CANDLE_CONFIRM_FILTER and price >= prev_low:
+                return None, None, None, None
             swing_high = float(df5["high"].iloc[i - sw + 1 : i + 1].max())
             sl = swing_high * (1 + config.SL_BUFFER_PCT)
             sl_dist = sl - price

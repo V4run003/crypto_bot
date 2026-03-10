@@ -74,8 +74,13 @@ def check_signal(candles_5m, candles_1h):
         if abs(price - ema50) > config.EMA50_PULLBACK_ATR_MULT * atr:
             return _no_signal(adx=adx)
 
+    prev_high = float(df["high"].iloc[-3])
+    prev_low  = float(df["low"].iloc[-3])
+
     # ── Long: 5m price above EMA200, 1H aligned, selling-exhaustion hook ──────
     if price > ema and htf_long_ok and _wr_exhaustion_long(df):
+        if config.CANDLE_CONFIRM_FILTER and price <= prev_high:
+            return _no_signal(adx=adx)   # candle hasn't broken above prev high yet
         swing_low = float(df["low"].iloc[-(config.SWING_LOOKBACK + 1):-1].min())
         sl        = swing_low * (1 - config.SL_BUFFER_PCT)
         sl_dist   = price - sl
@@ -87,6 +92,8 @@ def check_signal(candles_5m, candles_1h):
 
     # ── Short: 5m price below EMA200, 1H aligned, buying-exhaustion hook ──────
     if price < ema and htf_short_ok and _wr_exhaustion_short(df):
+        if config.CANDLE_CONFIRM_FILTER and price >= prev_low:
+            return _no_signal(adx=adx)   # candle hasn't broken below prev low yet
         swing_high = float(df["high"].iloc[-(config.SWING_LOOKBACK + 1):-1].max())
         sl         = swing_high * (1 + config.SL_BUFFER_PCT)
         sl_dist    = sl - price
