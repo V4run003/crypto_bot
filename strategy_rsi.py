@@ -1,3 +1,19 @@
+"""
+strategy_rsi.py  —  RSI Pullback in Trend strategy.
+
+Signal logic (closed-candle, no look-ahead bias):
+  LONG:  5m price > EMA200  AND  1H price > 1H EMA200  AND  ADX ≥ threshold
+         AND  ATR > ATR_MA  AND  RSI_LONG_ZONE_LOW ≤ rsi ≤ RSI_LONG_ZONE_HIGH
+         AND  rsi > rsi_prev  (RSI turning up after the pullback)
+
+  SHORT: 5m price < EMA200  AND  1H price < 1H EMA200  AND  ADX ≥ threshold
+         AND  ATR > ATR_MA  AND  RSI_SHORT_ZONE_LOW ≤ rsi ≤ RSI_SHORT_ZONE_HIGH
+         AND  rsi < rsi_prev  (RSI turning down after the bounce)
+
+SL / TP use the same swing-based calc as the WR strategy.
+All shared filters (ADX rising, time, EMA50 pullback, HTF) are honoured.
+"""
+
 import logging
 from datetime import datetime, timezone
 
@@ -12,8 +28,7 @@ logger = logging.getLogger(__name__)
 def check_signal(candles_5m, candles_1h):
     """
     Evaluate the most recently *closed* candle (iloc[-2]) against all
-    strategy rules.  Using [-2] instead of [-1] prevents look-ahead bias
-    and signal repainting on the forming candle.
+    RSI pullback strategy rules.
 
     Returns a dict:
         {signal: "long"|"short"|None, entry, sl, tp, adx, atr}
@@ -32,7 +47,7 @@ def check_signal(candles_5m, candles_1h):
 
     # ── Closed signal candle values (iloc[-2]) ────────────────────────────────
     row      = df.iloc[-2]
-    row_prev = df.iloc[-3]   # for ADX-rising filter
+    row_prev = df.iloc[-3]
     price    = row["close"]
     ema      = row["ema200"]
     ema50    = row["ema50"]
@@ -40,13 +55,15 @@ def check_signal(candles_5m, candles_1h):
     adx_prev = row_prev["adx"]
     atr      = row["atr"]
     atr_ma   = row["atr_ma"]
+    rsi      = row["rsi"]
+    rsi_prev = row_prev["rsi"]
 
-    if any(pd.isna(v) for v in [price, ema, adx, atr, atr_ma]):
+    if any(pd.isna(v) for v in [price, ema, adx, atr, atr_ma, rsi, rsi_prev]):
         return _no_signal()
 
     logger.debug(
-        "[closed] price=%.4f  ema=%.4f  adx=%.2f  atr=%.6f  atr_ma=%.6f",
-        price, ema, adx, atr, atr_ma,
+        "[closed] price=%.4f  ema=%.4f  adx=%.2f  rsi=%.2f  rsi_prev=%.2f",
+        price, ema, adx, rsi, rsi_prev,
     )
 
     # Volatility filter — skip flat markets
@@ -57,11 +74,11 @@ def check_signal(candles_5m, candles_1h):
     if adx <= config.ADX_THRESHOLD:
         return _no_signal(adx=adx)
 
-    # ADX rising filter — momentum must be increasing
+    # ADX rising filter
     if config.ADX_RISING_FILTER and not pd.isna(adx_prev) and adx <= adx_prev:
         return _no_signal(adx=adx)
 
-    # Time-of-day filter — only trade during liquid hours
+    # Time-of-day filter
     if config.TIME_FILTER:
         bar_hour = datetime.fromtimestamp(
             float(row["timestamp"]) / 1000, tz=timezone.utc
@@ -69,13 +86,15 @@ def check_signal(candles_5m, candles_1h):
         if bar_hour < config.TIME_FILTER_START or bar_hour >= config.TIME_FILTER_END:
             return _no_signal(adx=adx)
 
-    # EMA50 pullback filter — price must be within N ATR of EMA50
+    # EMA50 pullback filter
     if config.EMA50_PULLBACK_FILTER and not pd.isna(ema50):
         if abs(price - ema50) > config.EMA50_PULLBACK_ATR_MULT * atr:
             return _no_signal(adx=adx)
 
-    # ── Long: 5m price above EMA200, 1H aligned, selling-exhaustion hook ──────
-    if price > ema and htf_long_ok and _wr_exhaustion_long(df):
+    # ── Long: uptrend + RSI pulled back into zone + RSI turning up ───────────
+    if (price > ema and htf_long_ok
+            and config.RSI_LONG_ZONE_LOW <= rsi <= config.RSI_LONG_ZONE_HIGH
+            and rsi > rsi_prev):
         swing_low = float(df["low"].iloc[-(config.SWING_LOOKBACK + 1):-1].min())
         sl        = swing_low * (1 - config.SL_BUFFER_PCT)
         sl_dist   = price - sl
@@ -85,8 +104,10 @@ def check_signal(candles_5m, candles_1h):
         return {"signal": "long",  "entry": price, "sl": sl, "tp": tp,
                 "adx": adx, "atr": atr}
 
-    # ── Short: 5m price below EMA200, 1H aligned, buying-exhaustion hook ──────
-    if price < ema and htf_short_ok and _wr_exhaustion_short(df):
+    # ── Short: downtrend + RSI bounced into zone + RSI turning down ──────────
+    if (price < ema and htf_short_ok
+            and config.RSI_SHORT_ZONE_LOW <= rsi <= config.RSI_SHORT_ZONE_HIGH
+            and rsi < rsi_prev):
         swing_high = float(df["high"].iloc[-(config.SWING_LOOKBACK + 1):-1].max())
         sl         = swing_high * (1 + config.SL_BUFFER_PCT)
         sl_dist    = sl - price
@@ -122,7 +143,7 @@ def _prepare_df(candles):
         df["ema200"] = ta.trend.ema_indicator(df["close"], window=200)
         df["ema50"]  = ta.trend.ema_indicator(df["close"], window=50)
         df["adx"]    = ta.trend.adx(df["high"], df["low"], df["close"], window=14)
-        df["wr"]     = ta.momentum.williams_r(df["high"], df["low"], df["close"], lbp=14)
+        df["rsi"]    = ta.momentum.rsi(df["close"], window=config.RSI_PERIOD)
         df["atr"]    = ta.volatility.average_true_range(
                            df["high"], df["low"], df["close"], window=config.ATR_PERIOD)
         df["atr_ma"] = df["atr"].rolling(config.ATR_MA_PERIOD).mean()
@@ -151,33 +172,3 @@ def _get_1h_ema(candles_1h):
 def _no_signal(adx=None):
     return {"signal": None, "entry": None, "sl": None, "tp": None,
             "adx": adx, "atr": None}
-
-
-def _wr_exhaustion_long(df):
-    """
-    Selling exhaustion — long hook (closed-candle version):
-    - The WR_EXHAUSTION_LOOKBACK candles *before* the signal candle (iloc[-2])
-      were ALL below -80 (deep oversold).
-    - The signal candle (iloc[-2]) has WR crossing back *above* -80.
-    """
-    wr       = df["wr"]
-    lookback = config.WR_EXHAUSTION_LOOKBACK
-    if wr.iloc[-2] <= -80:               # signal candle still in zone — no hook
-        return False
-    prev = wr.iloc[-(lookback + 2):-2]   # candles before the signal candle
-    return (prev < -80).sum() >= lookback
-
-
-def _wr_exhaustion_short(df):
-    """
-    Buying exhaustion — short hook (closed-candle version):
-    - The WR_EXHAUSTION_LOOKBACK candles before the signal candle were ALL
-      above -20 (deep overbought).
-    - The signal candle (iloc[-2]) has WR crossing back *below* -20.
-    """
-    wr       = df["wr"]
-    lookback = config.WR_EXHAUSTION_LOOKBACK
-    if wr.iloc[-2] >= -20:               # still in zone — no hook
-        return False
-    prev = wr.iloc[-(lookback + 2):-2]
-    return (prev > -20).sum() >= lookback

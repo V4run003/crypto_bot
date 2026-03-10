@@ -27,6 +27,7 @@ SWING_LOOKBACK = 10
 SL_BUFFER_PCT  = 0.001
 ADX_THRESHOLD = 18
 
+HTF_FILTER               = True
 ADX_RISING_FILTER        = False
 TIME_FILTER              = True
 TIME_FILTER_START        = 8
