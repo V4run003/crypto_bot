@@ -18,8 +18,9 @@ Outputs:
   • Daily trade distribution (answers "does the 8→10 cap matter?")
 
 Usage:
-    python backtest_portfolio.py           # all APPROVED_COINS, 180 days
-    python backtest_portfolio.py 90        # 90 days
+    python backtest_portfolio.py              # all APPROVED_COINS, 180 days
+    python backtest_portfolio.py 90           # 90 days
+    python backtest_portfolio.py 180 274      # 180d window ending 274 days ago
 """
 
 import bisect
@@ -37,9 +38,9 @@ import backtest_hybrid as bh   # reuse fetch, indicator builders and signal chec
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
-def _load_coin(symbol, days):
-    df5  = bh.fetch_all_candles(exchange.session, symbol, 5,  days)
-    df1h = bh.fetch_all_candles(exchange.session, symbol, 60, days)
+def _load_coin(symbol, days, end_offset_days=0):
+    df5  = bh.fetch_all_candles(exchange.session, symbol, 5,  days, end_offset_days)
+    df1h = bh.fetch_all_candles(exchange.session, symbol, 60, days, end_offset_days)
     df5  = bh._build_5m_indicators(df5)
     df1h = bh._build_1h_indicators(df1h)
     return df5, df1h
@@ -47,7 +48,7 @@ def _load_coin(symbol, days):
 
 # ── Portfolio simulation ───────────────────────────────────────────────────────
 
-def run_portfolio(days):
+def run_portfolio(days, end_offset_days=0):
     symbols = list(config.APPROVED_COINS)
 
     print(f"\n{'=' * 70}")
@@ -63,7 +64,7 @@ def run_portfolio(days):
     for sym in symbols:
         print(f"  {sym} ...", end="", flush=True)
         try:
-            df5, df1h = _load_coin(sym, days)
+            df5, df1h = _load_coin(sym, days, end_offset_days)
             coin_data[sym] = (df5, df1h)
             print(f" {len(df5)} bars")
         except Exception as exc:
@@ -373,8 +374,9 @@ def _print_report(all_trades, trades_per_day, cap_blocked_days, days):
 
 
 def main():
-    days = int(sys.argv[1]) if len(sys.argv) > 1 else 180
-    all_trades, trades_per_day, cap_blocked_days = run_portfolio(days)
+    days            = int(sys.argv[1]) if len(sys.argv) > 1 else 180
+    end_offset_days = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    all_trades, trades_per_day, cap_blocked_days = run_portfolio(days, end_offset_days)
     _print_report(all_trades, trades_per_day, cap_blocked_days, days)
 
 

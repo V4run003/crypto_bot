@@ -60,10 +60,10 @@ def _fetch_chunk(session, symbol, interval, end_ms, limit=1000):
     raise RuntimeError("_fetch_chunk: still rate-limited after 5 attempts")
 
 
-def fetch_all_candles(session, symbol, interval, days):
+def fetch_all_candles(session, symbol, interval, days, end_offset_days=0):
     now_ms   = int(time.time() * 1000)
-    start_ms = now_ms - days * 86_400_000
-    end_ms   = now_ms
+    end_ms   = now_ms - end_offset_days * 86_400_000
+    start_ms = end_ms  - days * 86_400_000
     rows     = []
 
     label = f"{symbol} {interval}m"
