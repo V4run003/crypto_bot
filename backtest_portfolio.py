@@ -123,7 +123,7 @@ def run_portfolio(days):
         if in_trade:
             sym    = active_trade["symbol"]
             sig    = active_trade["sig"]
-            sl     = active_trade["sl"]
+            sl     = active_trade["sl"]  # may be updated to entry after BE
             tp     = active_trade["tp"]
             i_open = active_trade["i_open"]
 
@@ -142,19 +142,33 @@ def run_portfolio(days):
             result = None
             pnl    = 0.0
 
+            # Breakeven: move SL to entry once price hits 50% of TP distance
+            entry_px = active_trade["entry"]
+            halfway  = (entry_px + (tp - entry_px) * 0.5) if sig == "long" \
+                       else (entry_px - (entry_px - tp) * 0.5)
+            if not active_trade.get("be_triggered", False):
+                if (sig == "long" and hi >= halfway) or (sig == "short" and lo <= halfway):
+                    active_trade["be_triggered"] = True
+                    active_trade["sl"]           = entry_px
+                    sl = entry_px
+
             if sig == "long":
                 if lo <= sl:
-                    result, pnl, closed = "loss", -config.RISK_PER_TRADE, True
+                    be_hit = active_trade.get("be_triggered", False)
+                    result, pnl, closed = ("breakeven", 0.0, True) if be_hit \
+                                          else ("loss", -config.RISK_PER_TRADE, True)
                 elif hi >= tp:
                     result, pnl, closed = "win",   config.RISK_PER_TRADE * config.RR, True
             else:
                 if hi >= sl:
-                    result, pnl, closed = "loss", -config.RISK_PER_TRADE, True
+                    be_hit = active_trade.get("be_triggered", False)
+                    result, pnl, closed = ("breakeven", 0.0, True) if be_hit \
+                                          else ("loss", -config.RISK_PER_TRADE, True)
                 elif lo <= tp:
                     result, pnl, closed = "win",   config.RISK_PER_TRADE * config.RR, True
 
             # ADX fade: if trend collapses, exit at candle close
-            if not closed:
+            if not closed and config.ADX_FADE_ENABLED:
                 adx_j = df5.iloc[j]["adx"]
                 if not pd.isna(adx_j) and adx_j < config.ADX_THRESHOLD:
                     _entry   = active_trade["entry"]
@@ -232,9 +246,10 @@ def run_portfolio(days):
 def _stats(trades):
     if not trades:
         return {}
-    wins   = [t for t in trades if t["result"] == "win"]
-    losses = [t for t in trades if t["result"] == "loss"]
-    fades  = [t for t in trades if t["result"] == "fade"]
+    wins      = [t for t in trades if t["result"] == "win"]
+    losses    = [t for t in trades if t["result"] == "loss"]
+    fades     = [t for t in trades if t["result"] == "fade"]
+    breakevens= [t for t in trades if t["result"] == "breakeven"]
     gw     = sum(t["pnl"] for t in trades if t["pnl"] > 0)
     gl     = abs(sum(t["pnl"] for t in trades if t["pnl"] < 0))
     pf     = gw / gl if gl > 0 else float("inf")
@@ -259,7 +274,7 @@ def _stats(trades):
             streak = 0
     return {
         "n": len(trades), "wins": len(wins), "losses": len(losses),
-        "fades": len(fades),
+        "fades": len(fades), "breakevens": len(breakevens),
         "wr": wr, "pf": pf, "net": net, "max_dd": mx,
         "max_streak": max_streak,
     }
@@ -304,7 +319,7 @@ def _print_report(all_trades, trades_per_day, cap_blocked_days, days):
     print(f"  COMBINED PORTFOLIO  ({days} days: {first_dt} → {last_dt})")
     print(f"{'=' * 70}")
     print(f"  Total trades       : {s['n']}")
-    print(f"  Wins / Losses / Fades: {s['wins']} / {s['losses']} / {s['fades']}")
+    print(f"  Wins / Losses / BE / Fades: {s['wins']} / {s['losses']} / {s['breakevens']} / {s['fades']}")
     print(f"  Win rate           : {s['wr']:.1f}%")
     print(f"  Profit factor      : {s['pf']:.2f}")
     print(f"  Net PnL            : ${s['net']:+.2f}")

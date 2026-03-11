@@ -234,29 +234,39 @@ def run_backtest(symbol, days, quiet=False):
         exit_idx = None
         exit_px  = None
 
+        halfway      = entry + (tp - entry) * 0.5 if sig == "long" else entry - (entry - tp) * 0.5
+        be_triggered = False
+        active_sl    = sl
         for j in range(i + 1, min(i + 2000, len(df5))):
             hi = df5.iloc[j]["high"]
             lo = df5.iloc[j]["low"]
 
+            # Breakeven: move SL to entry once price hits 50% of TP distance
+            if not be_triggered:
+                if (sig == "long" and hi >= halfway) or (sig == "short" and lo <= halfway):
+                    be_triggered = True
+                    active_sl    = entry
+
             if sig == "long":
-                if lo <= sl:
-                    result, exit_px, exit_idx = "loss", sl, j
+                if lo <= active_sl:
+                    result, exit_px, exit_idx = ("loss" if active_sl < entry else "breakeven"), active_sl, j
                     break
                 if hi >= tp:
                     result, exit_px, exit_idx = "win", tp, j
                     break
             else:
-                if hi >= sl:
-                    result, exit_px, exit_idx = "loss", sl, j
+                if hi >= active_sl:
+                    result, exit_px, exit_idx = ("loss" if active_sl > entry else "breakeven"), active_sl, j
                     break
                 if lo <= tp:
                     result, exit_px, exit_idx = "win", tp, j
                     break
             # ADX fade: if trend collapses, exit at candle close
-            adx_j = df5.iloc[j]["adx"]
-            if not pd.isna(adx_j) and adx_j < config.ADX_THRESHOLD:
-                result, exit_px, exit_idx = "fade", df5.iloc[j]["close"], j
-                break
+            if config.ADX_FADE_ENABLED:
+                adx_j = df5.iloc[j]["adx"]
+                if not pd.isna(adx_j) and adx_j < config.ADX_THRESHOLD:
+                    result, exit_px, exit_idx = "fade", df5.iloc[j]["close"], j
+                    break
 
         if result is None:
             continue
@@ -282,7 +292,7 @@ def run_backtest(symbol, days, quiet=False):
         trades.append(trade)
 
         if not quiet:
-            mark = "✓" if result == "win" else ("~" if result == "fade" else "✗")
+            mark = "✓" if result == "win" else ("~" if result in ("fade", "breakeven") else "✗")
             print(
                 f"  {mark} {sig.upper():5s}  "
                 f"{trade['entry_time'].strftime('%Y-%m-%d %H:%M')} → "
@@ -305,9 +315,10 @@ def _print_stats(trades, days, symbol):
         print(f"\n  No completed trades found for {symbol} over {days} days.")
         return
 
-    wins   = [t for t in trades if t["result"] == "win"]
-    losses = [t for t in trades if t["result"] == "loss"]
-    fades  = [t for t in trades if t["result"] == "fade"]
+    wins      = [t for t in trades if t["result"] == "win"]
+    losses    = [t for t in trades if t["result"] == "loss"]
+    fades     = [t for t in trades if t["result"] == "fade"]
+    breakevens= [t for t in trades if t["result"] == "breakeven"]
     total  = len(trades)
 
     wr      = len(wins) / total * 100
@@ -348,8 +359,7 @@ def _print_stats(trades, days, symbol):
     print(f"  RESULTS (RSI) — {symbol}  ({days} days: {first_dt} → {last_dt})")
     print(f"{'─' * 62}")
     print(f"  Total trades       : {total}")
-    print(f"  Wins / Losses / Fades: {len(wins)} / {len(losses)} / {len(fades)}"
-          f"  (fade net: ${sum(t['pnl_usd'] for t in fades):+.2f})")
+    print(f"  Wins / Losses / BE / Fades: {len(wins)} / {len(losses)} / {len(breakevens)} / {len(fades)}")
     print(f"  Win rate           : {wr:.1f}%")
     print(f"  Avg trades / day   : {tpd:.2f}")
     print(f"  Net PnL            : ${net_pnl:+.2f}  (at ${config.RISK_PER_TRADE} risk/trade)")
