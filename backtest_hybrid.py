@@ -459,6 +459,11 @@ def run_backtest(symbol, days, quiet=False):
                     if lo <= tp:
                         result, exit_px, exit_idx = "win", tp, j
                         break
+                # ADX fade: if trend collapses, exit at candle close
+                adx_j = df5.iloc[j]["adx"]
+                if not pd.isna(adx_j) and adx_j < config.ADX_THRESHOLD:
+                    result, exit_px, exit_idx = "fade", df5.iloc[j]["close"], j
+                    break
 
         if result is None:
             continue
@@ -494,7 +499,7 @@ def run_backtest(symbol, days, quiet=False):
         trades.append(trade)
 
         if not quiet:
-            mark = "✓" if result == "win" else "✗"
+            mark = "✓" if result == "win" else ("~" if result == "fade" else "✗")
             print(
                 f"  {mark} [{strat:3s}] {sig.upper():5s}  "
                 f"{trade['entry_time'].strftime('%Y-%m-%d %H:%M')} → "
@@ -519,6 +524,7 @@ def _print_stats(trades, days, symbol, rsi_count, wr_count):
 
     wins   = [t for t in trades if t["result"] == "win"]
     losses = [t for t in trades if t["result"] == "loss"]
+    fades  = [t for t in trades if t["result"] == "fade"]
     total  = len(trades)
 
     wr_pct  = len(wins) / total * 100
@@ -528,8 +534,8 @@ def _print_stats(trades, days, symbol, rsi_count, wr_count):
 
     avg_win  = sum(t["pnl_usd"] for t in wins)   / len(wins)   if wins   else 0.0
     avg_loss = sum(t["pnl_usd"] for t in losses) / len(losses) if losses else 0.0
-    gross_w  = sum(t["pnl_usd"] for t in wins)
-    gross_l  = abs(sum(t["pnl_usd"] for t in losses))
+    gross_w  = sum(t["pnl_usd"] for t in trades if t["pnl_usd"] > 0)
+    gross_l  = abs(sum(t["pnl_usd"] for t in trades if t["pnl_usd"] < 0))
     pf       = gross_w / gross_l if gross_l > 0 else float("inf")
 
     equity = [0.0]
@@ -559,7 +565,8 @@ def _print_stats(trades, days, symbol, rsi_count, wr_count):
     print(f"  RESULTS (HYBRID) — {symbol}  ({days} days: {first_dt} → {last_dt})")
     print(f"{'─' * 62}")
     print(f"  Total trades       : {total}  (RSI: {rsi_count}  WR: {wr_count})")
-    print(f"  Wins / Losses      : {len(wins)} / {len(losses)}")
+    print(f"  Wins / Losses / Fades: {len(wins)} / {len(losses)} / {len(fades)}"
+          f"  (fade net: ${sum(t['pnl_usd'] for t in fades):+.2f})")
     print(f"  Win rate           : {wr_pct:.1f}%")
     print(f"  Avg trades / day   : {tpd:.2f}")
     print(f"  Net PnL            : ${net_pnl:+.2f}  (at ${config.RISK_PER_TRADE} risk/trade)")

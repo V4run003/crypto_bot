@@ -153,6 +153,17 @@ def run_portfolio(days):
                 elif lo <= tp:
                     result, pnl, closed = "win",   config.RISK_PER_TRADE * config.RR, True
 
+            # ADX fade: if trend collapses, exit at candle close
+            if not closed:
+                adx_j = df5.iloc[j]["adx"]
+                if not pd.isna(adx_j) and adx_j < config.ADX_THRESHOLD:
+                    _entry   = active_trade["entry"]
+                    _sl_dist = abs(_entry - active_trade["sl"])
+                    _close   = df5.iloc[j]["close"]
+                    _pts     = (_close - _entry) if sig == "long" else (_entry - _close)
+                    fade_pnl = config.RISK_PER_TRADE * (_pts / _sl_dist) if _sl_dist > 0 else 0.0
+                    result, pnl, closed = "fade", fade_pnl, True
+
             if closed:
                 active_trade["result"]   = result
                 active_trade["pnl"]      = pnl
@@ -223,8 +234,9 @@ def _stats(trades):
         return {}
     wins   = [t for t in trades if t["result"] == "win"]
     losses = [t for t in trades if t["result"] == "loss"]
-    gw     = sum(t["pnl"] for t in wins)
-    gl     = abs(sum(t["pnl"] for t in losses))
+    fades  = [t for t in trades if t["result"] == "fade"]
+    gw     = sum(t["pnl"] for t in trades if t["pnl"] > 0)
+    gl     = abs(sum(t["pnl"] for t in trades if t["pnl"] < 0))
     pf     = gw / gl if gl > 0 else float("inf")
     wr     = len(wins) / len(trades) * 100
     net    = sum(t["pnl"] for t in trades)
@@ -247,6 +259,7 @@ def _stats(trades):
             streak = 0
     return {
         "n": len(trades), "wins": len(wins), "losses": len(losses),
+        "fades": len(fades),
         "wr": wr, "pf": pf, "net": net, "max_dd": mx,
         "max_streak": max_streak,
     }
@@ -291,7 +304,7 @@ def _print_report(all_trades, trades_per_day, cap_blocked_days, days):
     print(f"  COMBINED PORTFOLIO  ({days} days: {first_dt} → {last_dt})")
     print(f"{'=' * 70}")
     print(f"  Total trades       : {s['n']}")
-    print(f"  Wins / Losses      : {s['wins']} / {s['losses']}")
+    print(f"  Wins / Losses / Fades: {s['wins']} / {s['losses']} / {s['fades']}")
     print(f"  Win rate           : {s['wr']:.1f}%")
     print(f"  Profit factor      : {s['pf']:.2f}")
     print(f"  Net PnL            : ${s['net']:+.2f}")

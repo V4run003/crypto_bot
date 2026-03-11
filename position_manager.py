@@ -136,7 +136,10 @@ def manage() -> bool:
                 move_stop_to_breakeven()
 
         # ── ADX-fade early exit (prop-firm minimum time respected) ────────────
-        if adx_now is not None and adx_now < config.ADX_THRESHOLD and enforce_minimum_trade_time():
+        if (config.ADX_FADE_ENABLED
+                and adx_now is not None
+                and adx_now < config.ADX_THRESHOLD
+                and enforce_minimum_trade_time()):
             logger.info(
                 "ADX faded to %.2f on %s — closing early", adx_now, symbol
             )
