@@ -126,7 +126,7 @@ def manage() -> bool:
         adx_now       = strategy.check_adx(candles_5m)
 
         # ── Breakeven at 50 % of TP distance ─────────────────────────────────
-        if not _breakeven_moved:
+        if config.BE_ENABLED and not _breakeven_moved:
             halfway = entry + (tp - entry) * 0.5
             triggered = (
                 (side == "Buy"  and current_price >= halfway) or

@@ -238,28 +238,30 @@ def run_backtest(symbol, days, quiet=False):
         be_triggered = False
         active_sl    = sl
         for j in range(i + 1, min(i + 2000, len(df5))):
-            hi = df5.iloc[j]["high"]
-            lo = df5.iloc[j]["low"]
+            hi    = df5.iloc[j]["high"]
+            lo    = df5.iloc[j]["low"]
+            close = df5.iloc[j]["close"]
 
             # Breakeven: move SL to entry once price hits 50% of TP distance
-            if not be_triggered:
-                if (sig == "long" and hi >= halfway) or (sig == "short" and lo <= halfway):
+            if config.BE_ENABLED and not be_triggered:
+                # Uses close (not high/low) to match live bot which checks current_price at candle close
+                if (sig == "long" and close >= halfway) or (sig == "short" and close <= halfway):
                     be_triggered = True
                     active_sl    = entry
 
             if sig == "long":
-                if lo <= active_sl:
-                    result, exit_px, exit_idx = ("loss" if active_sl < entry else "breakeven"), active_sl, j
-                    break
                 if hi >= tp:
                     result, exit_px, exit_idx = "win", tp, j
                     break
-            else:
-                if hi >= active_sl:
-                    result, exit_px, exit_idx = ("loss" if active_sl > entry else "breakeven"), active_sl, j
+                if lo <= active_sl:
+                    result, exit_px, exit_idx = ("loss" if active_sl < entry else "breakeven"), active_sl, j
                     break
+            else:
                 if lo <= tp:
                     result, exit_px, exit_idx = "win", tp, j
+                    break
+                if hi >= active_sl:
+                    result, exit_px, exit_idx = ("loss" if active_sl > entry else "breakeven"), active_sl, j
                     break
             # ADX fade: if trend collapses, exit at candle close
             if config.ADX_FADE_ENABLED:

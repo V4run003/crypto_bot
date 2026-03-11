@@ -142,30 +142,32 @@ def run_portfolio(days):
             result = None
             pnl    = 0.0
 
-            # Breakeven: move SL to entry once price hits 50% of TP distance
+            # Breakeven: move SL to entry when close crosses 50% of TP distance
+            # Uses close (not high/low) to match live bot which checks current_price at candle close
             entry_px = active_trade["entry"]
             halfway  = (entry_px + (tp - entry_px) * 0.5) if sig == "long" \
                        else (entry_px - (entry_px - tp) * 0.5)
-            if not active_trade.get("be_triggered", False):
-                if (sig == "long" and hi >= halfway) or (sig == "short" and lo <= halfway):
+            close_j  = df5.iloc[j]["close"]
+            if config.BE_ENABLED and not active_trade.get("be_triggered", False):
+                if (sig == "long" and close_j >= halfway) or (sig == "short" and close_j <= halfway):
                     active_trade["be_triggered"] = True
                     active_trade["sl"]           = entry_px
                     sl = entry_px
 
             if sig == "long":
-                if lo <= sl:
+                if hi >= tp:
+                    result, pnl, closed = "win",   config.RISK_PER_TRADE * config.RR, True
+                elif lo <= sl:
                     be_hit = active_trade.get("be_triggered", False)
                     result, pnl, closed = ("breakeven", 0.0, True) if be_hit \
                                           else ("loss", -config.RISK_PER_TRADE, True)
-                elif hi >= tp:
-                    result, pnl, closed = "win",   config.RISK_PER_TRADE * config.RR, True
             else:
-                if hi >= sl:
+                if lo <= tp:
+                    result, pnl, closed = "win",   config.RISK_PER_TRADE * config.RR, True
+                elif hi >= sl:
                     be_hit = active_trade.get("be_triggered", False)
                     result, pnl, closed = ("breakeven", 0.0, True) if be_hit \
                                           else ("loss", -config.RISK_PER_TRADE, True)
-                elif lo <= tp:
-                    result, pnl, closed = "win",   config.RISK_PER_TRADE * config.RR, True
 
             # ADX fade: if trend collapses, exit at candle close
             if not closed and config.ADX_FADE_ENABLED:
