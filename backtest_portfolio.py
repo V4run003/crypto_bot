@@ -21,6 +21,7 @@ Usage:
     python backtest_portfolio.py              # all APPROVED_COINS, 180 days
     python backtest_portfolio.py 90           # 90 days
     python backtest_portfolio.py 180 274      # 180d window ending 274 days ago
+    python backtest_portfolio.py 180 0 2      # 180d, per-coin daily cap = 2
 """
 
 import bisect
@@ -48,11 +49,12 @@ def _load_coin(symbol, days, end_offset_days=0):
 
 # ── Portfolio simulation ───────────────────────────────────────────────────────
 
-def run_portfolio(days, end_offset_days=0):
+def run_portfolio(days, end_offset_days=0, coin_daily_cap=0):
     symbols = list(config.APPROVED_COINS)
 
     print(f"\n{'=' * 70}")
-    print(f"  Portfolio Backtest  |  {len(symbols)} coins  |  {days} days")
+    cap_str = f"  coin cap={coin_daily_cap}/day" if coin_daily_cap > 0 else ""
+    print(f"  Portfolio Backtest  |  {len(symbols)} coins  |  {days} days{cap_str}")
     print(f"  MAX_TRADES_PER_DAY={config.MAX_TRADES_PER_DAY}  "
           f"MAX_DAILY_LOSS=${config.MAX_DAILY_LOSS}  "
           f"COOLDOWN={config.TRADE_COOLDOWN_SECS//60}m")
@@ -94,6 +96,7 @@ def run_portfolio(days, end_offset_days=0):
     cooldown_until   = -1      # timestamp (ms) until which no new trade allowed
     daily_loss       = 0.0
     daily_trade_cnt  = 0
+    daily_coin_cnt   = defaultdict(int)  # per-coin trade count for current day
     daily_trades_capped = 0    # days where cap was hit
     current_day      = None
 
@@ -119,6 +122,7 @@ def run_portfolio(days, end_offset_days=0):
             current_day    = bar_day
             daily_loss     = 0.0
             daily_trade_cnt = 0
+            daily_coin_cnt.clear()
 
         # ── If in a trade, check if it resolved on this bar ───────────────────
         if in_trade:
@@ -220,6 +224,10 @@ def run_portfolio(days, end_offset_days=0):
             if sig is None:
                 continue
 
+            # ── Per-coin daily cap ────────────────────────────────────────────
+            if coin_daily_cap > 0 and daily_coin_cnt[sym] >= coin_daily_cap:
+                continue
+
             # ── Signal found — open trade ─────────────────────────────────────
             open_dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
             active_trade = {
@@ -236,6 +244,7 @@ def run_portfolio(days, end_offset_days=0):
             }
             in_trade          = True
             daily_trade_cnt  += 1
+            daily_coin_cnt[sym] += 1
             break  # only one trade per bar across all coins
 
     # ── Handle trade still open at end of data ────────────────────────────────
@@ -376,7 +385,8 @@ def _print_report(all_trades, trades_per_day, cap_blocked_days, days):
 def main():
     days            = int(sys.argv[1]) if len(sys.argv) > 1 else 180
     end_offset_days = int(sys.argv[2]) if len(sys.argv) > 2 else 0
-    all_trades, trades_per_day, cap_blocked_days = run_portfolio(days, end_offset_days)
+    coin_daily_cap  = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+    all_trades, trades_per_day, cap_blocked_days = run_portfolio(days, end_offset_days, coin_daily_cap)
     _print_report(all_trades, trades_per_day, cap_blocked_days, days)
 
 
