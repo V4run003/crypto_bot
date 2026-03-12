@@ -211,19 +211,8 @@ def _get_htf_ema(candles):
 
 
 def _get_1h_ema(candles_1h):
-    """Return (latest_close, ema200) from 1-hour candles, or (None, None). Delegates to _get_htf_ema."""
-    try:
-        df = pd.DataFrame(
-            candles_1h,
-            columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"],
-        )
-        df = df.iloc[::-1].reset_index(drop=True)
-        df["close"] = df["close"].astype(float)
-        df["ema200"] = ta.trend.ema_indicator(df["close"], window=200)
-        return float(df["close"].iloc[-1]), float(df["ema200"].iloc[-1])
-    except Exception as exc:
-        logger.warning("_get_1h_ema error: %s", exc)
-        return None, None
+    """Return (latest_close, ema200) from 1-hour candles, or (None, None)."""
+    return _get_htf_ema(candles_1h)
 
 
 def _no_signal(adx=None):
