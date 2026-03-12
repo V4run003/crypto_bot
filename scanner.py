@@ -77,6 +77,17 @@ def scan():
                     tp    = wr_result["tp"]
                     logger.info("WR exhaustion signal on %s: %s", symbol, sig)
 
+            # ── Regime filter — skip counter-trend signals ────────────────────
+            if sig and config.REGIME_FILTER:
+                candles_1d = exchange.get_candles_daily(symbol)
+                regime = strategy.get_regime(candles_1d, symbol)
+                if sig == "long" and regime == "bear":
+                    logger.info("REGIME: skipping %s LONG (bear regime)", symbol)
+                    sig = None
+                elif sig == "short" and regime == "bull":
+                    logger.info("REGIME: skipping %s SHORT (bull regime)", symbol)
+                    sig = None
+
             if sig == "long":
                 logger.info("Bullish signal detected on %s", symbol)
                 info = trade.open_long(symbol, entry, sl, tp)

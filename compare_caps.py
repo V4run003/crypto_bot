@@ -21,8 +21,8 @@ def fetch_all():
     for sym in symbols:
         print(f"  {sym} ...", end="", flush=True)
         try:
-            df5, df1h = bp._load_coin(sym, DAYS, END_OFFSET)
-            coin_data[sym] = (df5, df1h)
+            df5, df1h, df1d = bp._load_coin(sym, DAYS, END_OFFSET)
+            coin_data[sym] = (df5, df1h, df1d)
             print(f" {len(df5)} bars")
         except Exception as exc:
             print(f" FAILED ({exc}) — skipping")
@@ -49,6 +49,11 @@ def run_with_cap(coin_data, cap):
         df5 = coin_data[sym][0]
         ts_to_idx[sym] = {int(ts): i for i, ts in enumerate(df5["timestamp"])}
     ts1h_arrays = {sym: coin_data[sym][1]["timestamp"].values for sym in symbols}
+    ts1d_arrays = {}
+    if config.REGIME_FILTER:
+        for sym in symbols:
+            if coin_data[sym][2] is not None:
+                ts1d_arrays[sym] = coin_data[sym][2]["timestamp"].values
 
     all_trades = []
     in_trade = False
@@ -151,11 +156,14 @@ def run_with_cap(coin_data, cap):
             if sym not in ts_to_idx or ts not in ts_to_idx[sym]:
                 continue
             i = ts_to_idx[sym][ts]
-            df5, df1h = coin_data[sym]
+            df5, df1h, df1d = coin_data[sym]
             ts1h = ts1h_arrays[sym]
             h_idx = bisect.bisect_right(ts1h, ts) - 1
+            d_idx = -1
+            if config.REGIME_FILTER and sym in ts1d_arrays:
+                d_idx = bisect.bisect_right(ts1d_arrays[sym], ts) - 2
 
-            sig_val, entry, sl, tp, strat = bh._check_signal(df5, i, df1h, h_idx, sym)
+            sig_val, entry, sl, tp, strat = bh._check_signal(df5, i, df1h, h_idx, sym, df1d, d_idx)
             if sig_val is None:
                 continue
 

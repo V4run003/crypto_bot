@@ -113,6 +113,17 @@ def get_candles_1h(symbol):
     return data["result"]["list"]
 
 
+def get_candles_daily(symbol):
+    """Fetch the latest 250 daily candles for regime detection."""
+    data = session.get_kline(
+        category="linear",
+        symbol=symbol,
+        interval="D",
+        limit=250,
+    )
+    return data["result"]["list"]
+
+
 # ── Account info ────────────────────────────────────────────────────────────
 
 def get_wallet_balance():

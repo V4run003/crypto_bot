@@ -44,7 +44,11 @@ def _load_coin(symbol, days, end_offset_days=0):
     df1h = bh.fetch_all_candles(exchange.session, symbol, 60, days, end_offset_days)
     df5  = bh._build_5m_indicators(df5)
     df1h = bh._build_1h_indicators(df1h)
-    return df5, df1h
+    df1d = None
+    if config.REGIME_FILTER:
+        df1d = bh.fetch_daily_candles(exchange.session, symbol, days + 60, end_offset_days)
+        df1d = bh._build_daily_indicators(df1d)
+    return df5, df1h, df1d
 
 
 # ── Portfolio simulation ───────────────────────────────────────────────────────
@@ -66,8 +70,8 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0):
     for sym in symbols:
         print(f"  {sym} ...", end="", flush=True)
         try:
-            df5, df1h = _load_coin(sym, days, end_offset_days)
-            coin_data[sym] = (df5, df1h)
+            df5, df1h, df1d = _load_coin(sym, days, end_offset_days)
+            coin_data[sym] = (df5, df1h, df1d)
             print(f" {len(df5)} bars")
         except Exception as exc:
             print(f" FAILED ({exc}) — skipping")
@@ -88,6 +92,12 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0):
 
     # Pre-build 1h timestamp arrays
     ts1h_arrays = {sym: coin_data[sym][1]["timestamp"].values for sym in active_symbols}
+    # Pre-build daily timestamp arrays for regime filter
+    ts1d_arrays = {}
+    if config.REGIME_FILTER:
+        for sym in active_symbols:
+            if coin_data[sym][2] is not None:
+                ts1d_arrays[sym] = coin_data[sym][2]["timestamp"].values
 
     # ── Shared state ──────────────────────────────────────────────────────────
     all_trades       = []
@@ -216,11 +226,14 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0):
                 continue
 
             i   = ts_to_idx[sym][ts]
-            df5, df1h = coin_data[sym]
+            df5, df1h, df1d = coin_data[sym]
             ts1h = ts1h_arrays[sym]
             h_idx = bisect.bisect_right(ts1h, ts) - 1
+            d_idx = -1
+            if config.REGIME_FILTER and sym in ts1d_arrays:
+                d_idx = bisect.bisect_right(ts1d_arrays[sym], ts) - 2   # previous closed daily bar
 
-            sig, entry, sl, tp, strat = bh._check_signal(df5, i, df1h, h_idx, sym)
+            sig, entry, sl, tp, strat = bh._check_signal(df5, i, df1h, h_idx, sym, df1d, d_idx)
             if sig is None:
                 continue
 

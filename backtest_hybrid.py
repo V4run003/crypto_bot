@@ -99,6 +99,44 @@ def fetch_all_candles(session, symbol, interval, days, end_offset_days=0):
     return df
 
 
+def fetch_daily_candles(session, symbol, days, end_offset_days=0):
+    """Fetch daily candles for regime detection (Bybit interval='D')."""
+    now_ms   = int(time.time() * 1000)
+    end_ms   = now_ms - end_offset_days * 86_400_000
+    start_ms = end_ms - days * 86_400_000
+    rows     = []
+
+    print(f"  Fetching {symbol} daily ({days}d) ...", end="", flush=True)
+
+    while True:
+        chunk = _fetch_chunk(session, symbol, "D", end_ms)
+        if not chunk:
+            break
+        rows.extend(chunk)
+        oldest_ts = int(chunk[-1][0])
+        if oldest_ts <= start_ms:
+            break
+        end_ms = oldest_ts - 1
+        time.sleep(0.12)
+
+    print(f" {len(rows)} candles")
+
+    df = pd.DataFrame(
+        rows,
+        columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"],
+    )
+    df["timestamp"] = df["timestamp"].astype(int)
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = df[col].astype(float)
+    df = (
+        df.sort_values("timestamp")
+          .drop_duplicates("timestamp")
+          .reset_index(drop=True)
+    )
+    df = df[df["timestamp"] >= start_ms].reset_index(drop=True)
+    return df
+
+
 # ── Indicator computation ─────────────────────────────────────────────────────
 
 def _build_5m_indicators(df):
@@ -120,6 +158,13 @@ def _build_5m_indicators(df):
 def _build_1h_indicators(df):
     df = df.copy()
     df["ema200"] = ta.trend.ema_indicator(df["close"], window=200)
+    return df
+
+
+def _build_daily_indicators(df):
+    """Compute the regime EMA on daily candles."""
+    df = df.copy()
+    df["ema_regime"] = ta.trend.ema_indicator(df["close"], window=config.REGIME_EMA_PERIOD)
     return df
 
 
@@ -295,11 +340,24 @@ def _check_wr_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
 
 # ── Hybrid signal (mirrors scanner.py) ───────────────────────────────────────
 
-def _check_signal(df5, i, df1h, h_idx, symbol):
+def _check_signal(df5, i, df1h, h_idx, symbol, df1d=None, d_idx=-1):
     ok, price, ema5, atr, htf_long_ok, htf_short_ok = \
         _passes_common_filters(df5, i, df1h, h_idx)
     if not ok:
         return None, None, None, None, None
+
+    # ── Regime filter (daily EMA) ─────────────────────────────────────────────
+    excluded = getattr(config, "REGIME_FILTER_EXCLUDED", [])
+    if config.REGIME_FILTER and symbol not in excluded and df1d is not None and d_idx >= 0:
+        row_d   = df1d.iloc[d_idx]
+        d_price = row_d["close"]
+        d_ema   = row_d["ema_regime"]
+        if not pd.isna(d_ema):
+            band = config.REGIME_NEUTRAL_PCT
+            if d_price < d_ema * (1 - band):    # bear regime → longs forbidden
+                htf_long_ok  = False
+            elif d_price > d_ema * (1 + band):  # bull regime → shorts forbidden
+                htf_short_ok = False
 
     sig = entry = sl = tp = None
     strategy_used = None
@@ -337,6 +395,13 @@ def run_backtest(symbol, days, quiet=False):
 
     df5  = fetch_all_candles(exchange.session, symbol, 5,  days)
     df1h = fetch_all_candles(exchange.session, symbol, 60, days)
+    # Daily candles for regime filter (+60d extra for EMA warmup)
+    df1d = None
+    ts1d = None
+    if config.REGIME_FILTER:
+        df1d = fetch_daily_candles(exchange.session, symbol, days + 60)
+        df1d = _build_daily_indicators(df1d)
+        ts1d = df1d["timestamp"].values
 
     print("  Computing indicators ...", end="", flush=True)
     df5  = _build_5m_indicators(df5)
@@ -358,8 +423,10 @@ def run_backtest(symbol, days, quiet=False):
             continue
 
         h_idx = bisect.bisect_right(ts1h, ts5[i]) - 1
-
-        sig, entry, sl, tp, strat = _check_signal(df5, i, df1h, h_idx, symbol)
+        d_idx = -1
+        if config.REGIME_FILTER and ts1d is not None:
+            d_idx = bisect.bisect_right(ts1d, ts5[i]) - 2   # previous fully-closed daily bar
+        sig, entry, sl, tp, strat = _check_signal(df5, i, df1h, h_idx, symbol, df1d, d_idx)
         if sig is None:
             continue
 

@@ -135,6 +135,49 @@ def check_adx(candles_5m):
     return float(df["adx"].iloc[-1])
 
 
+def get_regime(candles_1d, symbol=None):
+    """
+    Classify the current daily trend as 'bull', 'bear', or 'neutral'.
+
+      bull    = daily close > EMA × (1 + REGIME_NEUTRAL_PCT)  → take longs only
+      bear    = daily close < EMA × (1 - REGIME_NEUTRAL_PCT)  → take shorts only
+      neutral = price within ±REGIME_NEUTRAL_PCT band         → take both
+
+    Uses iloc[-2] (last fully-closed daily bar) to avoid look-ahead on the
+    still-forming today candle.  Fails open ('neutral') on any error so the
+    bot keeps trading rather than going silent on a data hiccup.
+    """
+    if not config.REGIME_FILTER:
+        return "neutral"
+    excluded = getattr(config, "REGIME_FILTER_EXCLUDED", [])
+    if symbol and symbol in excluded:
+        return "neutral"
+    try:
+        df = pd.DataFrame(
+            candles_1d,
+            columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"],
+        )
+        df = df.iloc[::-1].reset_index(drop=True)   # oldest → newest
+        df["close"] = df["close"].astype(float)
+        n = config.REGIME_EMA_PERIOD
+        if len(df) < n + 2:          # need at least n+1 bars + 1 closed bar
+            return "neutral"
+        ema_series = ta.trend.ema_indicator(df["close"], window=n)
+        ema_val = float(ema_series.iloc[-2])   # last CLOSED daily bar
+        price   = float(df["close"].iloc[-2])
+        if pd.isna(ema_val):
+            return "neutral"
+        band = config.REGIME_NEUTRAL_PCT
+        if price > ema_val * (1 + band):
+            return "bull"
+        if price < ema_val * (1 - band):
+            return "bear"
+        return "neutral"
+    except Exception as exc:
+        logger.warning("get_regime error: %s", exc)
+        return "neutral"
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _prepare_df(candles):
