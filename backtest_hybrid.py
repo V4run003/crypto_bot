@@ -161,6 +161,12 @@ def _build_1h_indicators(df):
     return df
 
 
+def _build_4h_indicators(df):
+    df = df.copy()
+    df["ema200"] = ta.trend.ema_indicator(df["close"], window=200)
+    return df
+
+
 def _build_daily_indicators(df):
     """Compute the regime EMA on daily candles."""
     df = df.copy()
@@ -340,7 +346,7 @@ def _check_wr_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
 
 # ── Hybrid signal (mirrors scanner.py) ───────────────────────────────────────
 
-def _check_signal(df5, i, df1h, h_idx, symbol, df1d=None, d_idx=-1):
+def _check_signal(df5, i, df1h, h_idx, symbol, df1d=None, d_idx=-1, df4h=None, h4_idx=-1):
     ok, price, ema5, atr, htf_long_ok, htf_short_ok = \
         _passes_common_filters(df5, i, df1h, h_idx)
     if not ok:
@@ -358,6 +364,20 @@ def _check_signal(df5, i, df1h, h_idx, symbol, df1d=None, d_idx=-1):
                 htf_long_ok  = False
             elif d_price > d_ema * (1 + band):  # bull regime → shorts forbidden
                 htf_short_ok = False
+
+    # ── 4H EMA200 filter ─────────────────────────────────────────────────────
+    excl_4h = getattr(config, "HTF_4H_FILTER_EXCLUDED", [])
+    if (getattr(config, "HTF_4H_FILTER", False)
+            and symbol not in excl_4h
+            and df4h is not None and h4_idx >= 200):
+        row_4h = df4h.iloc[h4_idx]
+        p4h    = float(row_4h["close"])
+        ema_4h = row_4h["ema200"]
+        if not pd.isna(ema_4h):
+            if p4h <= ema_4h:
+                htf_long_ok  = False   # 4H bearish — no longs
+            if p4h >= ema_4h:
+                htf_short_ok = False   # 4H bullish — no shorts
 
     sig = entry = sl = tp = None
     strategy_used = None
@@ -402,6 +422,13 @@ def run_backtest(symbol, days, quiet=False):
         df1d = fetch_daily_candles(exchange.session, symbol, days + 60)
         df1d = _build_daily_indicators(df1d)
         ts1d = df1d["timestamp"].values
+    # 4H candles for 4H EMA200 filter
+    df4h = None
+    ts4h = None
+    if getattr(config, "HTF_4H_FILTER", False):
+        df4h = fetch_all_candles(exchange.session, symbol, 240, days)
+        df4h = _build_4h_indicators(df4h)
+        ts4h = df4h["timestamp"].values
 
     print("  Computing indicators ...", end="", flush=True)
     df5  = _build_5m_indicators(df5)
@@ -422,11 +449,13 @@ def run_backtest(symbol, days, quiet=False):
         if i < skip_until:
             continue
 
-        h_idx = bisect.bisect_right(ts1h, ts5[i]) - 1
-        d_idx = -1
+        h_idx  = bisect.bisect_right(ts1h, ts5[i]) - 1
+        h4_idx = (bisect.bisect_right(ts4h, ts5[i]) - 1) if ts4h is not None else -1
+        d_idx  = -1
         if config.REGIME_FILTER and ts1d is not None:
             d_idx = bisect.bisect_right(ts1d, ts5[i]) - 2   # previous fully-closed daily bar
-        sig, entry, sl, tp, strat = _check_signal(df5, i, df1h, h_idx, symbol, df1d, d_idx)
+        sig, entry, sl, tp, strat = _check_signal(
+            df5, i, df1h, h_idx, symbol, df1d, d_idx, df4h, h4_idx)
         if sig is None:
             continue
 

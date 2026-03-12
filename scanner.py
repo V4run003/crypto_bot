@@ -53,13 +53,18 @@ def scan():
         try:
             candles_5m = exchange.get_candles(symbol)
             candles_1h = exchange.get_candles_1h(symbol)
+            candles_4h = None
+            excl_4h = getattr(config, "HTF_4H_FILTER_EXCLUDED", [])
+            if getattr(config, "HTF_4H_FILTER", False) and symbol not in excl_4h:
+                candles_4h = exchange.get_candles_4h(symbol)
 
             sig   = None
             entry = sl = tp = None
 
             # ── RSI-preferred coins: try RSI first ────────────────────────────
             if config.RSI_STRATEGY and symbol in config.RSI_APPROVED_COINS:
-                rsi_result = strategy_rsi.check_signal(candles_5m, candles_1h)
+                rsi_result = strategy_rsi.check_signal(
+                    candles_5m, candles_1h, candles_4h=candles_4h, symbol=symbol)
                 if rsi_result["signal"]:
                     sig   = rsi_result["signal"]
                     entry = rsi_result["entry"]
@@ -69,7 +74,8 @@ def scan():
 
             # ── WR exhaustion: all coins (fallback for RSI coins, primary for rest) ─
             if sig is None:
-                wr_result = strategy.check_signal(candles_5m, candles_1h)
+                wr_result = strategy.check_signal(
+                    candles_5m, candles_1h, candles_4h=candles_4h, symbol=symbol)
                 if wr_result["signal"]:
                     sig   = wr_result["signal"]
                     entry = wr_result["entry"]

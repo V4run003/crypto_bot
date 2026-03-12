@@ -9,7 +9,7 @@ import config
 logger = logging.getLogger(__name__)
 
 
-def check_signal(candles_5m, candles_1h):
+def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
     """
     Evaluate the most recently *closed* candle (iloc[-2]) against all
     strategy rules.  Using [-2] instead of [-1] prevents look-ahead bias
@@ -29,6 +29,18 @@ def check_signal(candles_5m, candles_1h):
     if config.HTF_FILTER and price_1h is not None and ema_1h is not None and not pd.isna(ema_1h):
         htf_long_ok  = price_1h > ema_1h
         htf_short_ok = price_1h < ema_1h
+
+    # ── 4H EMA200 filter ─────────────────────────────────────────────────────
+    excl_4h = getattr(config, "HTF_4H_FILTER_EXCLUDED", [])
+    if (getattr(config, "HTF_4H_FILTER", False)
+            and (symbol is None or symbol not in excl_4h)
+            and candles_4h is not None):
+        price_4h, ema_4h = _get_htf_ema(candles_4h)
+        if price_4h is not None and ema_4h is not None and not pd.isna(ema_4h):
+            if price_4h <= ema_4h:
+                htf_long_ok  = False   # 4H bearish — no longs
+            if price_4h >= ema_4h:
+                htf_short_ok = False   # 4H bullish — no shorts
 
     # ── Closed signal candle values (iloc[-2]) ────────────────────────────────
     row      = df.iloc[-2]
@@ -204,8 +216,24 @@ def _prepare_df(candles):
         return None
 
 
+def _get_htf_ema(candles):
+    """Return (latest_close, ema200) from any HTF candle list, or (None, None)."""
+    try:
+        df = pd.DataFrame(
+            candles,
+            columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"],
+        )
+        df = df.iloc[::-1].reset_index(drop=True)
+        df["close"] = df["close"].astype(float)
+        df["ema200"] = ta.trend.ema_indicator(df["close"], window=200)
+        return float(df["close"].iloc[-1]), float(df["ema200"].iloc[-1])
+    except Exception as exc:
+        logger.warning("_get_htf_ema error: %s", exc)
+        return None, None
+
+
 def _get_1h_ema(candles_1h):
-    """Return (latest_close, ema200) from 1-hour candles, or (None, None)."""
+    """Return (latest_close, ema200) from 1-hour candles, or (None, None). Delegates to _get_htf_ema."""
     try:
         df = pd.DataFrame(
             candles_1h,
