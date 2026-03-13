@@ -241,7 +241,6 @@ All rules serve the CFT 1-phase challenge: grow $5,000 → $5,500, with a 4% max
 | Mar 2026 | Daily regime filter (EMA20) rejected | PF unchanged, net −$575, consec losses worse; 1H EMA200 already handles trend alignment |
 
 ---
-
 ## 9. How to add a new coin
 
 1. Run standalone backtest: `python backtest_hybrid.py NEWUSDT 180`
@@ -274,3 +273,8 @@ sudo journalctl -u cryptobot.service -n 200    # last 200 lines
 ```
 
 The VPS `config.py` must always have the **live Bybit Demo keys** (`F4ZD88D7...`) and `DEMO = True`. Local `config.py` uses the test keys.
+
+
+Note:
+
+SMA pullback on 15m confirmed clean edge: ZEC 1.88, BTC 1.46, PAXG 1.56 (long-only). Slot conflict makes it incompatible with shared single-slot WR/RSI portfolio. Viable as separate parallel process on dedicated coins. Revisit after CFT challenge completion.

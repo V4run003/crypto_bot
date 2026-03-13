@@ -220,6 +220,16 @@ def notify_risk_limit(reason: str):
     )
 
 
+def notify_signal_drought(hours: float):
+    """Alert when no signal has fired for DROUGHT_ALERT_HOURS during the trading window."""
+    send(
+        f"🔇 <b>Signal Drought</b>  —  {_ts()}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"No signals for <b>{hours:.1f}h</b> during the active trading window.\n"
+        f"Check: parabolic bull (WR never hits -80), regime change, or API issue.\n"
+    )
+
+
 def notify_error(title: str, detail: str):
     short = detail[:800] if len(detail) > 800 else detail
     send(

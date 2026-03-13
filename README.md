@@ -41,7 +41,6 @@ Candle confirmation, volume filter (1.05×–2.0×), resistance proximity, ADX r
 | RR | 1.5 (swept 1.0–3.0; 1.5 optimal — higher RR breaches $300 DD limit) |
 
 ## Project structure
-
 ```
 bot.py               — Main loop: NTP sync, candle timing, window notifications, daily report
 config.py            — All settings (gitignored — copy from config.example.py)

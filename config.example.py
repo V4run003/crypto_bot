@@ -29,9 +29,15 @@ ADX_THRESHOLD = 18
 
 HTF_FILTER               = True
 ADX_RISING_FILTER        = False
-TIME_FILTER              = True
+ADX_RISING2_FILTER       = False
+CANDLE_CONFIRM_FILTER    = False
+VOLUME_CONFIRM_FILTER    = False
+VOLUME_CONFIRM_MULT      = 1.4
+RESISTANCE_FILTER        = False
+RESISTANCE_ATR_MULT      = 0.5
+TIME_FILTER              = False
 TIME_FILTER_START        = 8
-TIME_FILTER_END          = 20
+TIME_FILTER_END          = 22
 EMA50_PULLBACK_FILTER    = False
 EMA50_PULLBACK_ATR_MULT  = 1.0
 
@@ -42,6 +48,29 @@ MAX_MARGIN_PCT = 0.20
 
 TRADE_COOLDOWN_SECS     = 600
 MIN_TRADE_DURATION_SECS = 60
+ADX_FADE_ENABLED        = False
+BE_ENABLED              = False
+
+PARTIAL_TP_ENABLED = False
+PARTIAL_TP1_R      = 1.0
+PARTIAL_TP2_R      = 2.0
+
+# ── 4H EMA200 higher-timeframe filter (V3) ───────────────────────────────────
+# Apply to all coins except those in the excluded list.
+# Test per-coin with htf_4h_compare.py before adding/removing from excluded list.
+HTF_4H_FILTER          = True
+HTF_4H_FILTER_EXCLUDED = []   # coins where 4H filter hurts edge — add per coin
+
+# ── Regime filter (daily EMA) — off by default, 1H EMA200 already covers this ─
+REGIME_FILTER          = False
+REGIME_EMA_PERIOD      = 20
+REGIME_NEUTRAL_PCT     = 0.005
+REGIME_FILTER_EXCLUDED = []
+
+# ── Signal drought Telegram alert ────────────────────────────────────────────
+# Fires once if no trade opens for this many hours during the active window.
+# Resets automatically when the next trade fires.  Set 0 to disable.
+DROUGHT_ALERT_HOURS    = 6
 
 USE_LIMIT_ENTRY          = True
 LIMIT_ORDER_TIMEOUT_SECS = 30
@@ -63,15 +92,25 @@ BACKTEST_DAYS    = 90
 BACKTEST_QUIET   = False
 
 APPROVED_COINS = [
-    "GRTUSDT",
     "PAXGUSDT",
     "ZECUSDT",
-    "TIAUSDT",
     "SUIUSDT",
-    "TONUSDT",
-    "BNBUSDT",
-    "CRVUSDT",
+    "PIPPINUSDT",
+    "RIVERUSDT",
+    "BCHUSDT",
     "BTCUSDT",
-    "ETHUSDT",
+    "ATOMUSDT",
 ]
 FALLBACK_COINS = APPROVED_COINS
+RSI_STRATEGY = True
+RSI_APPROVED_COINS = [
+    "ZECUSDT",
+    "SUIUSDT",
+    "BTCUSDT",
+]
+
+RSI_PERIOD          = 14
+RSI_LONG_ZONE_LOW   = 28
+RSI_LONG_ZONE_HIGH  = 45
+RSI_SHORT_ZONE_LOW  = 55
+RSI_SHORT_ZONE_HIGH = 72

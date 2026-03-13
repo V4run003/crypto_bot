@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.WARNING)
 # ── Historical data fetching ──────────────────────────────────────────────────
 
 def _fetch_chunk(session, symbol, interval, end_ms, limit=1000):
-    for attempt in range(5):
+    for attempt in range(6):
         try:
             resp = session.get_kline(
                 category="linear",
@@ -49,15 +49,21 @@ def _fetch_chunk(session, symbol, interval, end_ms, limit=1000):
             return resp["result"]["list"]
         except Exception as exc:
             msg = str(exc).lower()
-            if "10006" in msg or "429" in msg or "rate limit" in msg or "too many" in msg:
-                wait = 20 * (attempt + 1)
-                print(f"\n  [rate-limit] {exc} — sleeping {wait}s ...", end="", flush=True)
+            is_rate = "10006" in msg or "429" in msg or "rate limit" in msg or "too many" in msg
+            is_conn = "connection" in msg or "reset" in msg or "ssl" in msg or "timeout" in msg
+            if is_rate:
+                wait = 20 * (attempt + 1)      # 20s, 40s, 60s …
+                print(f"\n  [rate-limit] sleeping {wait}s ...", end="", flush=True)
                 time.sleep(wait)
-            elif attempt == 4:
+            elif is_conn:
+                wait = 60 * (attempt + 1)      # 60s, 120s, 180s … IP-block needs longer
+                print(f"\n  [conn-reset] sleeping {wait}s ...", end="", flush=True)
+                time.sleep(wait)
+            elif attempt == 5:
                 raise
             else:
-                time.sleep(3 * (attempt + 1))
-    raise RuntimeError("_fetch_chunk: still rate-limited after 5 attempts")
+                time.sleep(5 * (attempt + 1))
+    raise RuntimeError("_fetch_chunk: failed after 6 attempts")
 
 
 def fetch_all_candles(session, symbol, interval, days, end_offset_days=0):
@@ -78,7 +84,7 @@ def fetch_all_candles(session, symbol, interval, days, end_offset_days=0):
         if oldest_ts <= start_ms:
             break
         end_ms = oldest_ts - 1
-        time.sleep(0.12)  # ≈8 req/s — stays under Bybit's 10 req/s public limit
+        time.sleep(0.5)  # 2 req/s sustained
 
     print(f" {len(rows)} candles")
 
@@ -352,6 +358,10 @@ def _check_signal(df5, i, df1h, h_idx, symbol, df1d=None, d_idx=-1, df4h=None, h
     if not ok:
         return None, None, None, None, None
 
+    # Per-coin direction override — block shorts on structurally long-biased coins
+    if symbol in getattr(config, "WR_LONG_ONLY_COINS", []):
+        htf_short_ok = False
+
     # ── Regime filter (daily EMA) ─────────────────────────────────────────────
     excluded = getattr(config, "REGIME_FILTER_EXCLUDED", [])
     if config.REGIME_FILTER and symbol not in excluded and df1d is not None and d_idx >= 0:
@@ -414,11 +424,13 @@ def run_backtest(symbol, days, quiet=False):
     print(f"{'=' * 62}")
 
     df5  = fetch_all_candles(exchange.session, symbol, 5,  days)
+    time.sleep(5)
     df1h = fetch_all_candles(exchange.session, symbol, 60, days)
     # Daily candles for regime filter (+60d extra for EMA warmup)
     df1d = None
     ts1d = None
     if config.REGIME_FILTER:
+        time.sleep(5)
         df1d = fetch_daily_candles(exchange.session, symbol, days + 60)
         df1d = _build_daily_indicators(df1d)
         ts1d = df1d["timestamp"].values
@@ -426,6 +438,7 @@ def run_backtest(symbol, days, quiet=False):
     df4h = None
     ts4h = None
     if getattr(config, "HTF_4H_FILTER", False):
+        time.sleep(5)
         df4h = fetch_all_candles(exchange.session, symbol, 240, days)
         df4h = _build_4h_indicators(df4h)
         ts4h = df4h["timestamp"].values

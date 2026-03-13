@@ -101,7 +101,7 @@ def scan():
                     risk.record_trade()
                     position_manager.set_trade({**info, "original_tp": tp})
                     logger.info("Opening LONG %s", symbol)
-                    break
+                    return True
 
             elif sig == "short":
                 logger.info("Bearish signal detected on %s", symbol)
@@ -110,7 +110,9 @@ def scan():
                     risk.record_trade()
                     position_manager.set_trade({**info, "original_tp": tp})
                     logger.info("Opening SHORT %s", symbol)
-                    break
+                    return True
 
         except Exception as exc:
             logger.error("Error scanning %s: %s", symbol, exc)
+
+    return False

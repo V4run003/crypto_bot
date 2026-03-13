@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.WARNING)
 # ── Historical data fetching (identical to backtest.py) ───────────────────────
 
 def _fetch_chunk(session, symbol, interval, end_ms, limit=1000):
-    for attempt in range(5):
+    for attempt in range(6):
         try:
             resp = session.get_kline(
                 category="linear",
@@ -37,11 +37,29 @@ def _fetch_chunk(session, symbol, interval, end_ms, limit=1000):
                 limit=limit,
                 end=end_ms,
             )
+            if resp.get("retCode", 0) == 10006:
+                wait = 20 * (attempt + 1)
+                print(f"\n  [rate-limit] sleeping {wait}s ...", end="", flush=True)
+                time.sleep(wait)
+                continue
             return resp["result"]["list"]
-        except Exception:
-            if attempt == 4:
+        except Exception as exc:
+            msg = str(exc).lower()
+            is_rate = "10006" in msg or "429" in msg or "rate limit" in msg or "too many" in msg
+            is_conn = "connection" in msg or "reset" in msg or "ssl" in msg or "timeout" in msg
+            if is_rate:
+                wait = 20 * (attempt + 1)      # 20s, 40s, 60s …
+                print(f"\n  [rate-limit] sleeping {wait}s ...", end="", flush=True)
+                time.sleep(wait)
+            elif is_conn:
+                wait = 60 * (attempt + 1)      # 60s, 120s, 180s … IP-block needs longer
+                print(f"\n  [conn-reset] sleeping {wait}s ...", end="", flush=True)
+                time.sleep(wait)
+            elif attempt == 5:
                 raise
-            time.sleep(3 * (attempt + 1))
+            else:
+                time.sleep(5 * (attempt + 1))
+    raise RuntimeError("_fetch_chunk: failed after 6 attempts")
 
 
 def fetch_all_candles(session, symbol, interval, days):
@@ -62,7 +80,7 @@ def fetch_all_candles(session, symbol, interval, days):
         if oldest_ts <= start_ms:
             break
         end_ms = oldest_ts - 1
-        time.sleep(0.05)
+        time.sleep(0.5)  # 2 req/s sustained
 
     print(f" {len(rows)} candles")
 
@@ -206,6 +224,7 @@ def run_backtest(symbol, days, quiet=False):
     print(f"{'=' * 62}")
 
     df5  = fetch_all_candles(exchange.session, symbol, 5,  days)
+    time.sleep(5)
     df1h = fetch_all_candles(exchange.session, symbol, 60, days)
 
     print("  Computing indicators ...", end="", flush=True)

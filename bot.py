@@ -110,6 +110,10 @@ def main():
     # Track UTC date so we can fire the daily report at midnight rollover.
     _last_report_day = datetime.now(timezone.utc).date()
 
+    # ── Signal drought tracking ───────────────────────────────────────────────
+    _last_signal_time  = None   # set whenever a trade is opened
+    _drought_alerted   = False  # reset when a new trade fires
+
     while True:
         wait = seconds_to_next_candle()
         _logger.info("Next scan in %.1f s (waiting for candle close)", wait)
@@ -137,7 +141,21 @@ def main():
                 utc_time, s["trade_count"], config.MAX_TRADES_PER_DAY,
                 s["daily_loss"], s["trailing_dd_left"], s["cooldown_secs"],
             )
-            scanner.scan()
+            trade_opened = scanner.scan()
+            if trade_opened:
+                _last_signal_time = now_utc
+                _drought_alerted  = False
+
+            # ── Signal drought alert ──────────────────────────────────────────
+            drought_hours = getattr(config, "DROUGHT_ALERT_HOURS", 6)
+            if drought_hours > 0:
+                hour_utc = now_utc.hour
+                in_window = config.TIME_FILTER_START <= hour_utc < config.TIME_FILTER_END
+                if in_window and _last_signal_time is not None and not _drought_alerted:
+                    silent_h = (now_utc - _last_signal_time).total_seconds() / 3600
+                    if silent_h >= drought_hours:
+                        telegram_bot.notify_signal_drought(silent_h)
+                        _drought_alerted = True
 
         except KeyboardInterrupt:
             _logger.info("Bot stopped by user.")

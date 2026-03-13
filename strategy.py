@@ -42,6 +42,10 @@ def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
             if price_4h >= ema_4h:
                 htf_short_ok = False   # 4H bullish — no shorts
 
+    # ── Per-coin direction override ───────────────────────────────────────────
+    if symbol in getattr(config, "WR_LONG_ONLY_COINS", []):
+        htf_short_ok = False
+
     # ── Closed signal candle values (iloc[-2]) ────────────────────────────────
     row      = df.iloc[-2]
     row_prev = df.iloc[-3]   # for ADX-rising filter
