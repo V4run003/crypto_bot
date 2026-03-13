@@ -21,8 +21,11 @@ import pandas as pd
 import ta
 
 import config
+from data_cache import DataCache, CacheMissError
 
 logging.basicConfig(level=logging.WARNING)
+
+_cache = DataCache()
 
 
 # ── Historical data fetching (identical to backtest.py) ───────────────────────
@@ -223,9 +226,10 @@ def run_backtest(symbol, days, quiet=False):
           f"  |  period={config.RSI_PERIOD}")
     print(f"{'=' * 62}")
 
-    df5  = fetch_all_candles(exchange.session, symbol, 5,  days)
-    time.sleep(5)
-    df1h = fetch_all_candles(exchange.session, symbol, 60, days)
+    df5  = _cache.get(symbol, 5,  days, exchange=exchange.session)
+    if not getattr(config, "USE_CACHE", True):
+        time.sleep(5)
+    df1h = _cache.get(symbol, 60, days, exchange=exchange.session)
 
     print("  Computing indicators ...", end="", flush=True)
     df5  = _build_5m_indicators(df5)

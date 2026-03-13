@@ -24,8 +24,11 @@ import pandas as pd
 import ta
 
 import config
+from data_cache import DataCache, CacheMissError
 
 logging.basicConfig(level=logging.WARNING)
+
+_cache = DataCache()
 
 
 # ── Historical data fetching ──────────────────────────────────────────────────
@@ -423,23 +426,26 @@ def run_backtest(symbol, days, quiet=False):
         print(f"  Signal mode: {rsi_flag}")
     print(f"{'=' * 62}")
 
-    df5  = fetch_all_candles(exchange.session, symbol, 5,  days)
-    time.sleep(5)
-    df1h = fetch_all_candles(exchange.session, symbol, 60, days)
+    df5  = _cache.get(symbol, 5,  days, exchange=exchange.session)
+    if not getattr(config, "USE_CACHE", True):
+        time.sleep(5)
+    df1h = _cache.get(symbol, 60, days, exchange=exchange.session)
     # Daily candles for regime filter (+60d extra for EMA warmup)
     df1d = None
     ts1d = None
     if config.REGIME_FILTER:
-        time.sleep(5)
-        df1d = fetch_daily_candles(exchange.session, symbol, days + 60)
+        if not getattr(config, "USE_CACHE", True):
+            time.sleep(5)
+        df1d = _cache.get(symbol, "D", days + 60, exchange=exchange.session)
         df1d = _build_daily_indicators(df1d)
         ts1d = df1d["timestamp"].values
     # 4H candles for 4H EMA200 filter
     df4h = None
     ts4h = None
     if getattr(config, "HTF_4H_FILTER", False):
-        time.sleep(5)
-        df4h = fetch_all_candles(exchange.session, symbol, 240, days)
+        if not getattr(config, "USE_CACHE", True):
+            time.sleep(5)
+        df4h = _cache.get(symbol, 240, days, exchange=exchange.session)
         df4h = _build_4h_indicators(df4h)
         ts4h = df4h["timestamp"].values
 

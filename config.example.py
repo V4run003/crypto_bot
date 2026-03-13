@@ -114,3 +114,12 @@ RSI_LONG_ZONE_LOW   = 28
 RSI_LONG_ZONE_HIGH  = 45
 RSI_SHORT_ZONE_LOW  = 55
 RSI_SHORT_ZONE_HIGH = 72
+
+# ── Candle data cache ─────────────────────────────────────────────────────────
+# Backtest scripts read from disk on warm runs — no API calls, no rate-limit waits.
+# Cache key: symbol + interval + days (e.g. ZECUSDT_5m_180d.parquet)
+# Freshness: file mtime — files older than CACHE_MAX_AGE_DAYS are re-fetched.
+# Run `python cache_manager.py --refresh` to pre-warm before a batch of backtests.
+USE_CACHE          = True   # False = always fetch live (bypasses cache entirely)
+CACHE_DIR          = "cache"  # Relative to working directory
+CACHE_MAX_AGE_DAYS = 7      # Files older than this are considered stale and re-fetched

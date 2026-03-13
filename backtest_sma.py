@@ -38,8 +38,11 @@ import pandas as pd
 import ta
 
 import config
+from data_cache import DataCache, CacheMissError
 
 logging.basicConfig(level=logging.WARNING)
+
+_cache = DataCache()
 
 # ── Config defaults (can be overridden in config.py) ─────────────────────────
 _SMA_FAST       = getattr(config, "SMA_FAST",      20)
@@ -317,17 +320,20 @@ def run_backtest(symbol, days, quiet=False):
           f"  |  touch≤{_SMA_TOUCH_PCT*100:.2f}%")
     print(f"{'=' * 62}")
 
-    df5  = fetch_all_candles(exchange.session, symbol,   5, days)
-    time.sleep(5)
-    df15 = fetch_all_candles(exchange.session, symbol,  15, days)
-    time.sleep(5)
-    df1h = fetch_all_candles(exchange.session, symbol,  60, days)
+    df5  = _cache.get(symbol,   5, days, exchange=exchange.session)
+    if not getattr(config, "USE_CACHE", True):
+        time.sleep(5)
+    df15 = _cache.get(symbol,  15, days, exchange=exchange.session)
+    if not getattr(config, "USE_CACHE", True):
+        time.sleep(5)
+    df1h = _cache.get(symbol,  60, days, exchange=exchange.session)
     df4h = None
     if getattr(config, "HTF_4H_FILTER", False):
         excl_4h = getattr(config, "HTF_4H_FILTER_EXCLUDED", [])
         if symbol not in excl_4h:
-            time.sleep(3)
-            df4h = fetch_all_candles(exchange.session, symbol, 240, days)
+            if not getattr(config, "USE_CACHE", True):
+                time.sleep(3)
+            df4h = _cache.get(symbol, 240, days, exchange=exchange.session)
 
     print("  Computing indicators ...", end="", flush=True)
     df5  = _build_5m_indicators(df5)

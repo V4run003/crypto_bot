@@ -37,37 +37,49 @@ import config
 import exchange
 import backtest_hybrid as bh   # reuse fetch, indicator builders and signal checkers
 import backtest_sma as bs           # SMA signal checker and 15m indicator builder
+from data_cache import DataCache, CacheMissError
+
+_cache = DataCache()
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
 def _load_coin(symbol, days, end_offset_days=0):
-    df5  = bh.fetch_all_candles(exchange.session, symbol, 5,  days, end_offset_days)
-    time.sleep(5)
-    df1h = bh.fetch_all_candles(exchange.session, symbol, 60, days, end_offset_days)
+    df5  = _cache.get(symbol, 5,  days, exchange=exchange.session,
+                      end_offset_days=end_offset_days)
+    if not getattr(config, "USE_CACHE", True):
+        time.sleep(5)
+    df1h = _cache.get(symbol, 60, days, exchange=exchange.session,
+                      end_offset_days=end_offset_days)
     df5  = bh._build_5m_indicators(df5)
     df1h = bh._build_1h_indicators(df1h)
     df1d = None
     if config.REGIME_FILTER:
-        time.sleep(5)
-        df1d = bh.fetch_daily_candles(exchange.session, symbol, days + 60, end_offset_days)
+        if not getattr(config, "USE_CACHE", True):
+            time.sleep(5)
+        df1d = _cache.get(symbol, "D", days + 60, exchange=exchange.session,
+                          end_offset_days=end_offset_days)
         df1d = bh._build_daily_indicators(df1d)
     df4h = None
     if getattr(config, "HTF_4H_FILTER", False):
-        time.sleep(5)
-        df4h = bh.fetch_all_candles(exchange.session, symbol, 240, days, end_offset_days)
+        if not getattr(config, "USE_CACHE", True):
+            time.sleep(5)
+        df4h = _cache.get(symbol, 240, days, exchange=exchange.session,
+                          end_offset_days=end_offset_days)
         df4h = bh._build_4h_indicators(df4h)
     df15 = None
     sma_coins = getattr(config, "SMA_APPROVED_COINS", [])
     if getattr(config, "SMA_STRATEGY", False) and symbol in sma_coins:
-        time.sleep(5)
-        df15 = bh.fetch_all_candles(exchange.session, symbol, 15, days, end_offset_days)
+        if not getattr(config, "USE_CACHE", True):
+            time.sleep(5)
+        df15 = _cache.get(symbol, 15, days, exchange=exchange.session,
+                          end_offset_days=end_offset_days)
         df15 = bs._build_15m_indicators(df15)
     return df5, df1h, df1d, df4h, df15
 
 
 # ── Portfolio simulation ───────────────────────────────────────────────────────
 
-def run_portfolio(days, end_offset_days=0, coin_daily_cap=0):
+def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False):
     symbols = list(config.APPROVED_COINS)
 
     print(f"\n{'=' * 70}")
@@ -82,8 +94,8 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0):
     print("Fetching candle data:")
     coin_data = {}
     for idx, sym in enumerate(symbols):
-        if idx > 0:
-            time.sleep(8)  # cool-down between coins
+        if idx > 0 and not getattr(config, "USE_CACHE", True):
+            time.sleep(8)  # cool-down between coins when fetching live
         print(f"  {sym} ...", end="", flush=True)
         try:
             df5, df1h, df1d, df4h, df15 = _load_coin(sym, days, end_offset_days)
@@ -263,9 +275,10 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0):
             if config.REGIME_FILTER and sym in ts1d_arrays:
                 d_idx = bisect.bisect_right(ts1d_arrays[sym], ts) - 2   # previous closed daily bar
 
-            sig, entry, sl, tp, strat = bh._check_signal(
+            sig, entry, sl, tp, strat = (None, None, None, None, None) \
+                if sma_only else bh._check_signal(
                 df5, i, df1h, h_idx, sym, df1d, d_idx, df4h, h4_idx)
-            # SMA fallback: try SMA pullback if WR+RSI produced no signal
+            # SMA fallback (or primary when --sma-only): try SMA pullback
             if sig is None and sym in ts15_arrays:
                 i15 = bisect.bisect_right(ts15_arrays[sym], ts) - 1
                 sig_s, entry_s, sl_s, tp_s = bs._check_signal(
@@ -440,14 +453,20 @@ def _print_report(all_trades, trades_per_day, cap_blocked_days, days):
 
 def main():
     args            = [a for a in sys.argv[1:] if not a.startswith("--")]
-    no_sma          = "--no-sma" in sys.argv
+    no_sma          = "--no-sma"   in sys.argv
+    sma_only        = "--sma-only" in sys.argv
     days            = int(args[0]) if len(args) > 0 else 180
     end_offset_days = int(args[1]) if len(args) > 1 else 0
     coin_daily_cap  = int(args[2]) if len(args) > 2 else 0
     if no_sma:
         config.SMA_STRATEGY = False
         print("  [--no-sma] SMA fallback disabled — WR+RSI only\n")
-    all_trades, trades_per_day, cap_blocked_days = run_portfolio(days, end_offset_days, coin_daily_cap)
+    if sma_only:
+        config.SMA_STRATEGY = True
+        config.SMA_APPROVED_COINS = list(config.APPROVED_COINS)  # enable SMA for all coins
+        print("  [--sma-only] SMA strategy only — WR+RSI disabled\n")
+    all_trades, trades_per_day, cap_blocked_days = run_portfolio(
+        days, end_offset_days, coin_daily_cap, sma_only=sma_only)
     _print_report(all_trades, trades_per_day, cap_blocked_days, days)
 
 

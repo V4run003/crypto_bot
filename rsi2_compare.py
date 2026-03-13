@@ -50,7 +50,7 @@ PRESETS = [
 # ── Candle fetch (rate-limit aware) ──────────────────────────────────────────
 
 def _fetch_chunk(symbol, interval, end_ms, limit=1000):
-    for attempt in range(5):
+    for attempt in range(6):
         try:
             resp = exchange.session.get_kline(
                 category="linear", symbol=symbol,
@@ -64,13 +64,21 @@ def _fetch_chunk(symbol, interval, end_ms, limit=1000):
             return resp["result"]["list"]
         except Exception as exc:
             msg = str(exc).lower()
-            if any(x in msg for x in ("10006", "429", "rate limit", "too many")):
-                time.sleep(20 * (attempt + 1))
-            elif attempt == 4:
+            is_rate = "10006" in msg or "429" in msg or "rate limit" in msg or "too many" in msg
+            is_conn = "connection" in msg or "reset" in msg or "ssl" in msg or "timeout" in msg
+            if is_rate:
+                wait = 20 * (attempt + 1)
+                print(f"\n  [rate-limit] sleeping {wait}s ...", end="", flush=True)
+                time.sleep(wait)
+            elif is_conn:
+                wait = 60 * (attempt + 1)
+                print(f"\n  [conn-reset] sleeping {wait}s ...", end="", flush=True)
+                time.sleep(wait)
+            elif attempt == 5:
                 raise
             else:
-                time.sleep(3 * (attempt + 1))
-    raise RuntimeError("_fetch_chunk: rate-limited after 5 attempts")
+                time.sleep(5 * (attempt + 1))
+    raise RuntimeError("_fetch_chunk: failed after 6 attempts")
 
 
 def fetch_candles(symbol, interval, days):
@@ -88,7 +96,7 @@ def fetch_candles(symbol, interval, days):
         if oldest <= start_ms:
             break
         end_ms = oldest - 1
-        time.sleep(0.12)
+        time.sleep(0.5)  # 2 req/s sustained
     print(f" {len(rows)} candles")
     df = pd.DataFrame(rows, columns=["timestamp","open","high","low","close","volume","turnover"])
     df["timestamp"] = df["timestamp"].astype(int)

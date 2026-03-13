@@ -18,6 +18,7 @@ _*.py
 _*.txt
 *.log
 logs/
+*.parquet
 
 # ── Virtual environments ──────────────────────────────────────────────────────
 venv/
