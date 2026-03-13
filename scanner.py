@@ -58,18 +58,20 @@ def scan():
             if getattr(config, "HTF_4H_FILTER", False) and symbol not in excl_4h:
                 candles_4h = exchange.get_candles_4h(symbol)
 
-            sig   = None
+            sig           = None
             entry = sl = tp = None
+            strategy_name = None
 
             # ── RSI-preferred coins: try RSI first ────────────────────────────
             if config.RSI_STRATEGY and symbol in config.RSI_APPROVED_COINS:
                 rsi_result = strategy_rsi.check_signal(
                     candles_5m, candles_1h, candles_4h=candles_4h, symbol=symbol)
                 if rsi_result["signal"]:
-                    sig   = rsi_result["signal"]
-                    entry = rsi_result["entry"]
-                    sl    = rsi_result["sl"]
-                    tp    = rsi_result["tp"]
+                    sig           = rsi_result["signal"]
+                    entry         = rsi_result["entry"]
+                    sl            = rsi_result["sl"]
+                    tp            = rsi_result["tp"]
+                    strategy_name = "RSI"
                     logger.info("RSI pullback signal on %s: %s", symbol, sig)
 
             # ── WR exhaustion: all coins (fallback for RSI coins, primary for rest) ─
@@ -77,10 +79,11 @@ def scan():
                 wr_result = strategy.check_signal(
                     candles_5m, candles_1h, candles_4h=candles_4h, symbol=symbol)
                 if wr_result["signal"]:
-                    sig   = wr_result["signal"]
-                    entry = wr_result["entry"]
-                    sl    = wr_result["sl"]
-                    tp    = wr_result["tp"]
+                    sig           = wr_result["signal"]
+                    entry         = wr_result["entry"]
+                    sl            = wr_result["sl"]
+                    tp            = wr_result["tp"]
+                    strategy_name = "WR"
                     logger.info("WR exhaustion signal on %s: %s", symbol, sig)
 
             # ── Regime filter — skip counter-trend signals ────────────────────
@@ -99,7 +102,9 @@ def scan():
                 info = trade.open_long(symbol, entry, sl, tp)
                 if info:
                     risk.record_trade()
-                    position_manager.set_trade({**info, "original_tp": tp})
+                    position_manager.set_trade(
+                        {**info, "original_tp": tp, "strategy": strategy_name or "WR"}
+                    )
                     logger.info("Opening LONG %s", symbol)
                     return True
 
@@ -108,7 +113,9 @@ def scan():
                 info = trade.open_short(symbol, entry, sl, tp)
                 if info:
                     risk.record_trade()
-                    position_manager.set_trade({**info, "original_tp": tp})
+                    position_manager.set_trade(
+                        {**info, "original_tp": tp, "strategy": strategy_name or "WR"}
+                    )
                     logger.info("Opening SHORT %s", symbol)
                     return True
 

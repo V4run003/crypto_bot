@@ -79,7 +79,7 @@ def _load_coin(symbol, days, end_offset_days=0):
 
 # ── Portfolio simulation ───────────────────────────────────────────────────────
 
-def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False):
+def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, debug_sma=False):
     symbols = list(config.APPROVED_COINS)
 
     print(f"\n{'=' * 70}")
@@ -132,6 +132,18 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False):
         for sym in active_symbols:
             if coin_data[sym][4] is not None:
                 ts15_arrays[sym] = coin_data[sym][4]["timestamp"].values
+
+    if debug_sma:
+        print("\n  [debug-sma] 15m candle windows:")
+        for sym in active_symbols:
+            if sym in ts15_arrays:
+                df15 = coin_data[sym][4]
+                dt0 = datetime.fromtimestamp(int(df15["timestamp"].iloc[0])  / 1000, tz=timezone.utc)
+                dt1 = datetime.fromtimestamp(int(df15["timestamp"].iloc[-1]) / 1000, tz=timezone.utc)
+                print(f"    {sym:<18}  {len(df15):>6} 15m bars  {dt0.date()} → {dt1.date()}")
+            else:
+                print(f"    {sym:<18}  NOT LOADED (SMA_STRATEGY=False or not in SMA_APPROVED_COINS)")
+        print()
     # Pre-build daily timestamp arrays for regime filter
     ts1d_arrays = {}
     if config.REGIME_FILTER:
@@ -156,6 +168,12 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False):
 
     cooldown_candles = config.TRADE_COOLDOWN_SECS // (5 * 60)  # in bar units
 
+    # ── Debug counters (populated only when debug_sma=True) ──────────────────
+    dbg_slot_skip      = 0                    # 5m bars skipped: in_trade was True
+    dbg_wr_fired       = defaultdict(int)     # per coin: WR/RSI signal found
+    dbg_sma_attempted  = defaultdict(int)     # per coin: SMA scan reached (WR/RSI silent)
+    dbg_sma_fired      = defaultdict(int)     # per coin: SMA signal found
+
     # We'll iterate by 5m bar index in a global time-aligned way
     # For per-coin we need the index of each coin at each timestamp
     print("\nRunning simulation ...")
@@ -176,6 +194,8 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False):
 
         # ── If in a trade, check if it resolved on this bar ───────────────────
         if in_trade:
+            if debug_sma:
+                dbg_slot_skip += 1
             sym    = active_trade["symbol"]
             sig    = active_trade["sig"]
             sl     = active_trade["sl"]  # may be updated to entry after BE
@@ -278,13 +298,19 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False):
             sig, entry, sl, tp, strat = (None, None, None, None, None) \
                 if sma_only else bh._check_signal(
                 df5, i, df1h, h_idx, sym, df1d, d_idx, df4h, h4_idx)
+            if sig is not None and debug_sma:
+                dbg_wr_fired[sym] += 1
             # SMA fallback (or primary when --sma-only): try SMA pullback
             if sig is None and sym in ts15_arrays:
+                if debug_sma:
+                    dbg_sma_attempted[sym] += 1
                 i15 = bisect.bisect_right(ts15_arrays[sym], ts) - 1
                 sig_s, entry_s, sl_s, tp_s = bs._check_signal(
                     df5, i, df15, i15, df1h, h_idx, df4h, h4_idx, sym)
                 if sig_s is not None:
                     sig, entry, sl, tp, strat = sig_s, entry_s, sl_s, tp_s, "SMA"
+                    if debug_sma:
+                        dbg_sma_fired[sym] += 1
             if sig is None:
                 continue
 
@@ -313,6 +339,45 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False):
 
     # ── Handle trade still open at end of data ────────────────────────────────
     # (Mark as unresolved — excluded from stats)
+
+    if debug_sma:
+        total_bars = len(all_ts)
+        sma_trades = [t for t in all_trades if t.get("strategy") == "SMA"]
+        print(f"\n{'=' * 70}")
+        print(f"  [debug-sma]  SMA signal diagnostics")
+        print(f"{'=' * 70}")
+        print(f"  Total 5m bars scanned : {total_bars:,}")
+        print(f"  Bars skipped (in_trade): {dbg_slot_skip:,}  "
+              f"({dbg_slot_skip / total_bars * 100:.1f}% of all bars)")
+        free_bars = total_bars - dbg_slot_skip
+        print(f"  Free bars (slot open) : {free_bars:,}  ({free_bars / total_bars * 100:.1f}%)")
+        print()
+        print(f"  {'Coin':<18}  {'WR/RSI fired':>12}  {'SMA attempted':>13}  "
+              f"{'SMA fired':>9}  {'SMA trades':>10}  Note")
+        print(f"  {'-' * 68}")
+        for sym in active_symbols:
+            wr   = dbg_wr_fired[sym]
+            att  = dbg_sma_attempted[sym]
+            frd  = dbg_sma_fired[sym]
+            trds = sum(1 for t in sma_trades if t["symbol"] == sym)
+            note = ""
+            if sym not in ts15_arrays:
+                note = "← no 15m data loaded"
+            elif att == 0:
+                note = "← never reached (WR/RSI always fired first, or earlier coin took slot)"
+            print(f"  {sym:<18}  {wr:>12,}  {att:>13,}  {frd:>9,}  {trds:>10,}  {note}")
+
+        # SMA trades by month
+        if sma_trades:
+            from collections import Counter
+            months = Counter(t["open_dt"].strftime("%Y-%m") for t in sma_trades)
+            print(f"\n  SMA trades by month ({len(sma_trades)} total):")
+            for mo in sorted(months):
+                bar = "█" * months[mo]
+                print(f"    {mo}  {months[mo]:>3}  {bar}")
+        else:
+            print(f"\n  No SMA trades in this run.")
+        print(f"\n{'=' * 70}\n")
 
     return all_trades, trades_per_day, cap_blocked_days
 
@@ -455,6 +520,7 @@ def main():
     args            = [a for a in sys.argv[1:] if not a.startswith("--")]
     no_sma          = "--no-sma"   in sys.argv
     sma_only        = "--sma-only" in sys.argv
+    debug_sma       = "--debug-sma" in sys.argv
     days            = int(args[0]) if len(args) > 0 else 180
     end_offset_days = int(args[1]) if len(args) > 1 else 0
     coin_daily_cap  = int(args[2]) if len(args) > 2 else 0
@@ -465,8 +531,11 @@ def main():
         config.SMA_STRATEGY = True
         config.SMA_APPROVED_COINS = list(config.APPROVED_COINS)  # enable SMA for all coins
         print("  [--sma-only] SMA strategy only — WR+RSI disabled\n")
+    if debug_sma and not sma_only and not getattr(config, "SMA_STRATEGY", False):
+        config.SMA_STRATEGY = True
+        print("  [--debug-sma] SMA_STRATEGY forced True for diagnostics\n")
     all_trades, trades_per_day, cap_blocked_days = run_portfolio(
-        days, end_offset_days, coin_daily_cap, sma_only=sma_only)
+        days, end_offset_days, coin_daily_cap, sma_only=sma_only, debug_sma=debug_sma)
     _print_report(all_trades, trades_per_day, cap_blocked_days, days)
 
 

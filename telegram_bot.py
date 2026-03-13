@@ -140,6 +140,9 @@ def notify_trade_opened(
     symbol: str, side: str, entry: float,
     sl: float, tp: float, qty: float,
     balance: float, trade_count: int,
+    strategy: str = "WR",
+    entry_type: str = "market",
+    wait_secs: float = 0.0,
 ):
     arrow     = "📈" if side == "Buy" else "📉"
     direction = "LONG" if side == "Buy" else "SHORT"
@@ -147,9 +150,16 @@ def notify_trade_opened(
     tp_dist   = abs(tp - entry)
     risk_usd  = sl_dist * qty
     reward    = tp_dist * qty
+    if entry_type == "limit":
+        entry_detail = f"limit (filled in {wait_secs:.0f}s)" if wait_secs > 0 else "limit"
+    elif wait_secs > 0:
+        entry_detail = f"market (waited {wait_secs:.0f}s)"
+    else:
+        entry_detail = "market"
     send(
         f"{arrow} <b>{direction} OPENED</b> — {symbol}  —  {_ts()}\n"
         f"━━━━━━━━━━━━━━━━━\n"
+        f"Strategy: <b>{strategy}</b>  |  Entry: {entry_detail}\n"
         f"Entry:   <b>${entry:,.4f}</b>\n"
         f"Stop:    ${sl:,.4f}  (risk   ${risk_usd:,.2f})\n"
         f"Target:  ${tp:,.4f}  (reward ${reward:,.2f})\n"
@@ -190,7 +200,7 @@ def notify_daily_report(
 ):
     wr          = (wins / trade_count * 100) if trade_count else 0
     pnl_flag    = "🟢" if daily_pnl >= 0 else "🔴"
-    total_target = config.ACCOUNT_SIZE * 0.10      # e.g. $500 for a $5k account
+    total_target = config.PROFIT_TARGET             # Phase 1 profit target (e.g. $800 for 10k 2-phase)
     earned       = max(0, total_target - profit_needed)
     progress     = min(100, earned / total_target * 100) if total_target else 0
     bars         = int(progress / 10)

@@ -1,6 +1,313 @@
 # Strategy & Backtest Reference
 
-*Last updated: March 2026 — CFT 1-phase $5,000 challenge, Bybit Demo*
+*Last updated: March 2026 — CFT 2-phase $10,000 challenge, Bybit Demo*
+
+---
+
+## 1. What the bot is doing
+
+The bot trades **Bybit USDT perpetual futures** on 8 approved coins using a **hybrid exhaustion strategy** on 5-minute candles.
+
+It looks for **overextended moves** — price pushed too far in one direction — and fades the extreme when momentum shows the first sign of reversal. Two variants are used:
+
+- **Williams %R Exhaustion** — all 8 coins
+- **RSI Pullback** — tried first on ZEC, SUI, BTC; WR used as fallback if RSI is silent
+
+Both signal types share the same filters, SL/TP logic, and risk rules. The only difference is the entry trigger condition.
+
+---
+
+## 2. Exact entry conditions
+
+### Shared pre-conditions (must ALL pass)
+
+| Check | Rule | Notes |
+|---|---|---|
+| 5m EMA 200 | Long: price > EMA200 / Short: price < EMA200 | Dead-cat bounce filter — never disabled |
+| 1H EMA 200 (HTF) | Same rule on the 1-hour chart | `HTF_FILTER = True` |
+| 4H EMA 200 | Same rule on 4-hour chart | Applied to 6 coins; SUI + PIPPIN excluded |
+| ADX ≥ 18 | Directional momentum required | Swept [14–26]; 18 optimal |
+| ATR > ATR_MA(20) | Market must not be flat/compressed | Cuts signals in chop |
+
+### WR Exhaustion signal
+
+1. `WR_EXHAUSTION_LOOKBACK = 1` candle sits deep in the extreme zone
+   - **Long**: WR < −80 (selling exhaustion)
+   - **Short**: WR > −20 (buying exhaustion)
+2. The next closed candle **exits the zone** (the "hook"):
+   - **Long**: WR crosses back above −80
+   - **Short**: WR crosses back below −20
+3. All shared filters above must pass
+
+### RSI Pullback signal (ZEC, SUI, BTC only — tried first)
+
+1. 14-period RSI is inside the pullback zone:
+   - **Long**: 28 ≤ RSI ≤ 45
+   - **Short**: 55 ≤ RSI ≤ 72
+2. RSI is **turning** in the trade direction (rising for longs, falling for shorts)
+3. All shared filters above must pass
+
+### Per-coin direction overrides
+
+- `WR_LONG_ONLY_COINS = ["PAXGUSDT"]` — shorts blocked. Bear-regime shorts: WR 27.8%, PF 0.58.
+- `SMA_LONG_ONLY_COINS = ["PAXGUSDT"]` — reserved for future SMA live integration
+
+### SL / TP calculation
+
+- **SL**: swing high/low of last 10 × 5m candles ± 0.1% buffer
+- **TP**: `entry ± (SL distance × 1.5)`
+- **Position size**: $50 risked per trade (0.5% of $10k)
+
+### Order execution
+
+- `USE_LIMIT_ENTRY = True` — post-only limit order attempted first (maker fee 0.02%)
+- If limit not filled within `LIMIT_ORDER_TIMEOUT_SECS` (30s), cancelled and market order sent (taker fee 0.06%)
+- `entry_type` (limit/market) and `wait_secs` recorded in trade log and Telegram message
+
+---
+
+## 3. What has been tested and rejected
+
+All testing on 180 days unless noted. BTC unless stated.
+
+### Filters that hurt
+
+| Filter | Result | Decision |
+|---|---|---|
+| ADX rising (1 candle) | −63% trades, PF flat | ❌ Rejected |
+| ADX rising (2 candles) | −69% trades, PF −0.03 | ❌ Rejected |
+| EMA50 pullback gate | PF 1.28 → 1.01, DD spikes | ❌ Rejected |
+| Candle-break confirm | PF 1.28 → 1.07, DD $287 → $625 | ❌ Rejected |
+| Volume confirm (1.05×–2.0×) | Best: PF −0.11 at 1.2×; every threshold hurts | ❌ Rejected |
+| Resistance proximity | Best: PF +0.02 (noise) | ❌ Rejected |
+| Wick sweep pre-filter | Cuts 65–75% trades; PF flat or worse (BTC −0.03, ZEC −0.21 at N=10) | ❌ Rejected |
+| StochRSI(14,3,3) gate | BTC −$250; cuts 20–37% trades with no gain | ❌ Rejected |
+| Dual WR-14+WR-112 | Cuts 45–50% trades; works on daily TF, not 5m | ❌ Rejected |
+| Partial TP 1R+1.5R | WR +8pp but net PnL −$725 | ❌ Rejected |
+| Breakeven (BE) stop | 331 BEs cut winners; PF 1.31 → 1.11, net −$4,312 | ❌ Rejected |
+| ADX fade early exit | Cuts 32% of trades; PF 1.31 → 1.18, net −$2,726 | ❌ Rejected |
+| Daily regime filter (EMA20) | PF flat, net −$575; HTF already handles it | ❌ Rejected |
+
+### Parameters confirmed optimal
+
+| Parameter | Value | Notes |
+|---|---|---|
+| ADX threshold | 18 | Optimal in [14,16,18,20,22,24,26] sweep |
+| RR | 1.5 | Optimal in 1.0–3.5 sweep |
+| WR lookback | 1 candle | More signals, same PF vs 2-candle |
+| RSI zones | 28–45 / 55–72 | Best in 7-preset sweep across BTC/ZEC/SUI |
+| Swing lookback | 10 candles | — |
+| ATR period | 14 | — |
+
+---
+
+## 4. Approved coin portfolio
+
+8 coins, validated on 180 days. Portfolio sim is conservative — coins compete for the single open slot.
+
+| Coin | Mode | Portfolio PF | Net | MaxDD | Standalone PF | Notes |
+|---|---|---|---|---|---|---|
+| PAXGUSDT | WR long-only | 1.35 | $925 | $300 | 1.48 | Gold-pegged; short disabled |
+| ZECUSDT | Hybrid | 1.38 | $1,350 | $350 | 1.45 | Best RSI coin |
+| SUIUSDT | Hybrid | 1.27 | $688 | $300 | 1.25 | 4H filter excluded |
+| PIPPINUSDT | WR only | 1.35 | $762 | $175 | 1.19 | 4H filter excluded |
+| RIVERUSDT | WR only | 1.26 | $488 | $288 | 1.40 | — |
+| BCHUSDT | WR only | 1.27 | $500 | $450 | 1.16 | Higher DD; monitor |
+| BTCUSDT | Hybrid | 1.21 | $438 | $312 | 1.13 | Core market |
+| ATOMUSDT | WR only | 1.19 | $275 | $225 | — | ⚠ PF 0.74 in Dec'24–Jun'25 (period-sensitive) |
+
+**Portfolio combined (V3, 180d, --no-sma):**
+- Net PnL: **$5,700** | Profit factor: **1.35** | MaxDD: **$312** | N: **1,252**
+
+### Portfolio with PAXG long-only applied
+- PAXG per-coin: N=166, PF 1.50, MaxDD $138 (was PF 1.24 with shorts)
+
+---
+
+## 5. Risk management (10k 2-phase)
+
+| Rule | Setting | Why |
+|---|---|---|
+| Risk per trade | $50 (0.5%) | Scales with $10k |
+| Max daily loss (bot) | $200 | $300 inside the $500 prop-firm daily limit |
+| Max overall loss | 10% = $1,000 | Fixed floor at $9,000 — not trailing |
+| DD buffer | $100 | Pause $100 before the floor |
+| Phase 1 target | $800 (8%) | Reach $10,800 |
+| Phase 2 target | $500 (5%) | Reach $11,300 on top |
+| Max trades/day | 14 | Blocks only 2.8% of days |
+| Cooldown | 10 min | Post-close cooldown |
+| Min duration | 60 s | Prop-firm compliance |
+| Max leverage | 5× | Set per-symbol via API |
+| `TRAILING_DD` | `False` | 2-phase has no trailing DD — fixed floor |
+
+---
+
+## 6. Trade log & versioning
+
+### trade_log.csv
+
+Every closed trade is appended to `trade_log.csv` (never overwritten). Survives restarts.
+
+Columns: `datetime, symbol, side, strategy, entry_type, entry, exit, pnl, duration_mins, close_reason, version`
+
+```bash
+python show_trades.py        # last 20 trades
+python show_trades.py 50     # last 50
+python show_trades.py all    # full history
+```
+
+### BOT_VERSION
+
+`BOT_VERSION` in `config.py` (currently `"3.1.0"`) is written into every trade log row. Bump it when making meaningful strategy or logic changes to track which version produced which trades.
+
+Version history:
+- `3.0.0` — V3 portfolio (4H EMA200 filter, PAXG long-only, rate-limit hardening)
+- `3.1.0` — 10k 2-phase rules (fixed DD, $50 risk, BOT_VERSION, trade log, Telegram entry_type/strategy)
+
+---
+
+## 7. Candle cache
+
+All backtest scripts read from `cache/` (parquet files) on warm runs — no API calls, no rate-limit waits.
+
+```bash
+python cache_manager.py --refresh             # refresh all 8 coins × 4 TFs (32 files)
+python cache_manager.py --refresh ZECUSDT    # single coin
+python cache_manager.py --status             # show files + age
+python cache_manager.py --clear              # delete all
+```
+
+Key: `{SYMBOL}_{interval}_{days}d.parquet`. Files older than `CACHE_MAX_AGE_DAYS` (7 days) are re-fetched automatically. Slice-from-larger: if 30d is requested and 180d exists, the last 30 days are sliced from disk without a fetch.
+
+---
+
+## 8. Project file map
+
+### Core bot (live trading)
+
+| File | Role |
+|---|---|
+| `bot.py` | Main loop: NTP sync, candle timing, daily report |
+| `scanner.py` | Symbol loop, hybrid signal orchestration |
+| `strategy.py` | WR exhaustion + `get_regime()` |
+| `strategy_rsi.py` | RSI pullback signal |
+| `exchange.py` | Bybit V5 API: orders, positions, balances, candles |
+| `risk.py` | Daily loss, fixed DD floor, `can_trade()` gate |
+| `position_manager.py` | Trade lifecycle, breakeven, ADX fade, trade_log.csv |
+| `trade.py` | Order placement (limit → market fallback) |
+| `market_scanner.py` | Dynamic top-N symbol discovery |
+| `telegram_bot.py` | Background Telegram sender |
+| `logger.py` | Logging setup |
+| `config.py` | All settings — gitignored |
+| `config.example.py` | Safe public template |
+
+### Data & utilities
+
+| File | Role |
+|---|---|
+| `data_cache.py` | Parquet candle cache (`DataCache` class) |
+| `cache_manager.py` | CLI: `--refresh`, `--status`, `--clear` |
+| `show_trades.py` | Print trade_log.csv to terminal |
+
+### Backtest scripts
+
+| File | Role |
+|---|---|
+| `backtest_hybrid.py` | **Primary** — mirrors scanner.py exactly |
+| `backtest_portfolio.py` | 8-coin portfolio sim (`--no-sma`, `--sma-only`) |
+| `backtest.py` | WR-only single-coin (legacy) |
+| `backtest_rsi.py` | RSI-only single-coin (legacy) |
+| `backtest_sma.py` | SMA pullback 15m (validated; not yet in live scanner) |
+
+### Research & comparison scripts
+
+| File | What it tested |
+|---|---|
+| `adx_sweep.py` | ADX threshold sweep [14–26] |
+| `adx_rising_compare.py` | ADX rising 1/2-candle filter |
+| `rr_sweep.py` | RR ratio sweep 1.0–3.5 |
+| `rsi_compare.py` | RSI vs WR head-to-head |
+| `rsi_zone_sweep.py` | RSI zone preset sweep (7 presets) |
+| `rsi2_compare.py` | RSI-2/3 extreme zones |
+| `volume_compare.py` | Volume confirmation filter sweep |
+| `resistance_compare.py` | Resistance proximity filter sweep |
+| `dual_wr_compare.py` | Dual WR-14+WR-112 confluence |
+| `stochrsi_compare.py` | StochRSI(14,3,3) gate |
+| `partial_tp_compare.py` | Partial TP 1R+1.5R and 1R+2.0R |
+| `batch_backtest.py` | Batch coin validation runner |
+| `validate_coins.py` | Candidate coin screener |
+| `compare_caps.py` | Per-coin daily cap comparison |
+| `regime_impact.py` | Regime filter per-coin impact |
+
+---
+
+## 9. Key decisions log
+
+| Date | Decision | Reason |
+|---|---|---|
+| Jan 2026 | ADX fade disabled | PF 1.31 → 1.18, net −$2,726 |
+| Jan 2026 | BE stop disabled | PF 1.31 → 1.11, net −$4,312 |
+| Feb 2026 | V2 hybrid strategy (RSI + WR) | RSI PF > WR on ZEC/SUI/BTC |
+| Mar 2026 | POWERUSDT removed | Live slippage −$37 on SL; 64 trades (low sample) |
+| Mar 2026 | 4H EMA200 filter added (V3) | PF +0.05, MaxDD −$188 across 6 coins; SUI+PIPPIN excluded |
+| Mar 2026 | PAXG long-only override | Short WR 27.8%, PF 0.58 in bear regime |
+| Mar 2026 | Daily regime filter rejected | PF unchanged, net −$575; 1H EMA200 already handles alignment |
+| Mar 2026 | Candle cache system added | Eliminate API rate limits during backtests |
+| Mar 2026 | Trade log (trade_log.csv) added | Persistent history across restarts |
+| Mar 2026 | Moved to 10k 2-phase account | Scale up; fixed DD (no trailing) |
+| Mar 2026 | SMA portfolio integration rejected | MaxDD $312 → $725 with SMA; BTC SMA PF 0.96; PIPPIN MaxDD $900; CFT floor $1,000 — too close |
+
+---
+
+## 10. How to add a new coin
+
+1. `python backtest_hybrid.py NEWUSDT 180` — **minimum: PF ≥ 1.25, MaxDD ≤ $500**
+2. Cross-period check: run with `end_offset_days=180` to test the *previous* 180-day window
+3. `python backtest_portfolio.py 180 --no-sma` with coin added to `APPROVED_COINS` — **accept only if portfolio PF ≥ 1.28 and MaxDD ≤ $500**
+4. Update `config.py` and push to VPS via git
+
+---
+
+## 11. VPS deployment
+
+```bash
+# SSH to VPS (or DigitalOcean browser console)
+cd /root/crypto_bot
+git pull
+nano config.py   # update if needed (gitignored — never committed)
+
+sudo systemctl restart cryptobot.service
+sudo systemctl status cryptobot.service
+sudo journalctl -u cryptobot.service -f        # live log
+sudo journalctl -u cryptobot.service -n 200    # last 200 lines
+
+# Trade history
+python show_trades.py 50
+```
+
+---
+
+## 12. SMA pullback (future)
+
+SMA pullback on 15m validated in backtest: ZEC PF 1.88, BTC 1.46, PAXG 1.56 (long-only), RIVER 1.41, BCH 1.28, ATOM 1.40, PIPPIN 1.53.
+
+### Portfolio integration test (Mar 2026, 180d, `--debug-sma`)
+
+| | No-SMA (V3 baseline) | With SMA |
+|---|---|---|
+| Net PnL | $5,700 | $7,700 |
+| Profit factor | 1.35 | 1.36 |
+| MaxDD | **$312** | **$725** |
+| Trades | 1,252 | 821 |
+
+SMA adds ~$2,000 net and 385 trades (2.1/day, spread evenly across all 6 months). However MaxDD more than doubles to $725 — dangerously close to the $1,000 CFT hard floor. Key findings:
+
+- **BTCUSDT SMA drags** — portfolio PF 0.96, net −$100 (standalone 1.46). Slot competition forces BTC-SMA to displace better WR/RSI signals earlier in the scan queue.
+- **PIPPINUSDT MaxDD** $175 → $900 with SMA — unacceptable.
+- **Slot starvation**: 73.8% of all 5m bars are inside a trade. Only 26.2% free. SMA trades are longer-duration and hold the slot away from faster WR/RSI signals on other coins.
+
+**Decision: `SMA_STRATEGY = False` until CFT Phase 1 completes.** The MaxDD expansion ($312 → $725) disqualifies the combined portfolio for a $1,000-floor prop challenge. Revisit SMA as a dedicated isolated process on its own account or symbol subset.
+
 
 ---
 

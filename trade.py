@@ -37,7 +37,7 @@ def calculate_qty(symbol, entry, sl, balance):
 
 
 def open_long(symbol, entry, sl, tp):
-    """Set leverage, size the position safely, then place a Buy market order."""
+    """Set leverage, size the position safely, then place a Buy order."""
     exchange.set_leverage(symbol, config.MAX_LEVERAGE)
     balance = exchange.get_wallet_balance()
     sl_r    = exchange.round_price(symbol, sl)
@@ -46,18 +46,21 @@ def open_long(symbol, entry, sl, tp):
     if qty is None:
         logger.warning("%s: calculated qty below exchange minimum — skipping long", symbol)
         return None
-    entry_r = exchange.round_price(symbol, entry)
-    exchange.place_order(symbol, "Buy", qty, sl=sl_r, tp=tp_r, limit_price=entry_r)
+    entry_r    = exchange.round_price(symbol, entry)
+    order_info = exchange.place_order(symbol, "Buy", qty, sl=sl_r, tp=tp_r, limit_price=entry_r)
+    entry_type = order_info.get("entry_type", "market")
+    wait_secs  = order_info.get("wait_secs", 0.0)
     logger.info(
-        "LONG  opened: %s  qty=%s  entry≈%.4f  sl=%s  tp=%s  leverage=%dx  balance=$%.2f",
-        symbol, qty, entry, sl_r, tp_r, config.MAX_LEVERAGE, balance,
+        "LONG  opened: %s  qty=%s  entry≈%.4f  sl=%s  tp=%s  leverage=%dx  balance=$%.2f  entry_type=%s",
+        symbol, qty, entry, sl_r, tp_r, config.MAX_LEVERAGE, balance, entry_type,
     )
     return {"symbol": symbol, "side": "Buy",
-            "qty": qty, "entry": entry, "sl": sl_r, "tp": tp_r}
+            "qty": qty, "entry": entry, "sl": sl_r, "tp": tp_r,
+            "entry_type": entry_type, "wait_secs": wait_secs}
 
 
 def open_short(symbol, entry, sl, tp):
-    """Set leverage, size the position safely, then place a Sell market order."""
+    """Set leverage, size the position safely, then place a Sell order."""
     exchange.set_leverage(symbol, config.MAX_LEVERAGE)
     balance = exchange.get_wallet_balance()
     sl_r    = exchange.round_price(symbol, sl)
@@ -66,14 +69,17 @@ def open_short(symbol, entry, sl, tp):
     if qty is None:
         logger.warning("%s: calculated qty below exchange minimum — skipping short", symbol)
         return None
-    entry_r = exchange.round_price(symbol, entry)
-    exchange.place_order(symbol, "Sell", qty, sl=sl_r, tp=tp_r, limit_price=entry_r)
+    entry_r    = exchange.round_price(symbol, entry)
+    order_info = exchange.place_order(symbol, "Sell", qty, sl=sl_r, tp=tp_r, limit_price=entry_r)
+    entry_type = order_info.get("entry_type", "market")
+    wait_secs  = order_info.get("wait_secs", 0.0)
     logger.info(
-        "SHORT opened: %s  qty=%s  entry≈%.4f  sl=%s  tp=%s  leverage=%dx  balance=$%.2f",
-        symbol, qty, entry, sl_r, tp_r, config.MAX_LEVERAGE, balance,
+        "SHORT opened: %s  qty=%s  entry≈%.4f  sl=%s  tp=%s  leverage=%dx  balance=$%.2f  entry_type=%s",
+        symbol, qty, entry, sl_r, tp_r, config.MAX_LEVERAGE, balance, entry_type,
     )
     return {"symbol": symbol, "side": "Sell",
-            "qty": qty, "entry": entry, "sl": sl_r, "tp": tp_r}
+            "qty": qty, "entry": entry, "sl": sl_r, "tp": tp_r,
+            "entry_type": entry_type, "wait_secs": wait_secs}
 
 
 def move_to_breakeven(symbol, entry):

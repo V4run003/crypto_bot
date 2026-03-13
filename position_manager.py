@@ -5,7 +5,9 @@ Tracks the single open trade and handles the full position lifecycle:
   - ADX-fade early exits (only after minimum trade duration)
   - Detecting SL/TP closures and reporting PnL
 """
+import csv
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -55,6 +57,9 @@ def set_trade(info: dict):
             entry=float(info["entry"]), sl=float(info["sl"]), tp=float(info["tp"]),
             qty=float(info["qty"]), balance=bal,
             trade_count=s["trade_count"],
+            strategy=info.get("strategy", "WR"),
+            entry_type=info.get("entry_type", "market"),
+            wait_secs=float(info.get("wait_secs", 0.0)),
         )
     except Exception as exc:
         logger.warning("Telegram notify_trade_opened failed: %s", exc)
@@ -165,6 +170,14 @@ def manage() -> bool:
                     balance=bal, dd_left=s["trailing_dd_left"],
                     close_reason="ADX fade",
                 )
+                _append_trade_log(
+                    symbol=symbol, side=side,
+                    strategy=_current_trade.get("strategy", "WR"),
+                    entry_type=_current_trade.get("entry_type", "market"),
+                    entry=entry, exit_price=current_price,
+                    pnl=pnl, duration_mins=duration_mins,
+                    close_reason="ADX fade",
+                )
             except Exception as exc:
                 logger.warning("Telegram notify_trade_closed failed: %s", exc)
             clear_trade()
@@ -241,6 +254,14 @@ def _on_position_closed():
             balance=bal, dd_left=s["trailing_dd_left"],
             close_reason="SL/TP",
         )
+        _append_trade_log(
+            symbol=symbol, side=side,
+            strategy=_current_trade.get("strategy", "WR"),
+            entry_type=_current_trade.get("entry_type", "market"),
+            entry=entry, exit_price=exit_price,
+            pnl=pnl, duration_mins=duration_mins,
+            close_reason="SL/TP",
+        )
     except Exception as exc:
         logger.warning("Telegram notify_trade_closed failed: %s", exc)
     clear_trade()
@@ -249,3 +270,40 @@ def _on_position_closed():
 def _estimate_pnl(side: str, entry: float, price: float, qty: float) -> float:
     """Rough unrealized PnL for early exits (before exchange confirms)."""
     return (price - entry) * qty if side == "Buy" else (entry - price) * qty
+
+
+_TRADE_LOG_PATH = "trade_log.csv"
+_TRADE_LOG_FIELDS = [
+    "datetime", "symbol", "side", "strategy", "entry_type",
+    "entry", "exit", "pnl", "duration_mins", "close_reason", "version",
+]
+
+
+def _append_trade_log(
+    symbol: str, side: str, strategy: str, entry_type: str,
+    entry: float, exit_price: float, pnl: float,
+    duration_mins: float, close_reason: str,
+):
+    """Append one row to the persistent trade log CSV."""
+    row = {
+        "datetime":     datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "symbol":       symbol,
+        "side":         side,
+        "strategy":     strategy,
+        "entry_type":   entry_type,
+        "entry":        round(entry, 6),
+        "exit":         round(exit_price, 6),
+        "pnl":          round(pnl, 4),
+        "duration_mins": round(duration_mins, 1),
+        "close_reason": close_reason,
+        "version":      getattr(config, "BOT_VERSION", "?"),
+    }
+    file_exists = os.path.isfile(_TRADE_LOG_PATH)
+    try:
+        with open(_TRADE_LOG_PATH, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=_TRADE_LOG_FIELDS)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
+    except Exception as exc:
+        logger.warning("trade_log write failed: %s", exc)

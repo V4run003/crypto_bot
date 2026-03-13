@@ -93,7 +93,7 @@ def main():
     risk.update_peak_balance()   # establish baseline peak for trailing DD guard
 
     s = risk.get_stats()
-    target_balance = config.ACCOUNT_SIZE * 1.10
+    target_balance = config.ACCOUNT_SIZE + config.PROFIT_TARGET
     profit_needed  = max(0.0, target_balance - balance)
     telegram_bot.notify_bot_started(
         balance=balance, peak=s["peak_balance"],
@@ -177,7 +177,7 @@ def _send_daily_report(report_day):
         except Exception:
             balance = 0.0
         date_str       = report_day.strftime("%a %d %b %Y")
-        target_balance = config.ACCOUNT_SIZE * 1.10
+        target_balance = config.ACCOUNT_SIZE + config.PROFIT_TARGET
         profit_needed  = max(0.0, target_balance - balance)
         telegram_bot.notify_daily_report(
             date_str=date_str,
