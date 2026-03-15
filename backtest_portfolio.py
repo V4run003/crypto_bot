@@ -153,33 +153,24 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, deb
 
     # ── Shared state ──────────────────────────────────────────────────────────
     all_trades       = []
-    in_trade         = False   # only one trade open at a time
-    active_trade     = None    # dict with trade details
-    cooldown_until   = -1      # timestamp (ms) until which no new trade allowed
+    active_trades    = []      # list of open trade dicts (up to MAX_OPEN_SLOTS)
+    max_slots        = getattr(config, "MAX_OPEN_SLOTS", 1)
+    cooldown_until   = -1      # timestamp (ms) — no NEW entry until this passes
     daily_loss       = 0.0
     daily_trade_cnt  = 0
-    daily_coin_cnt   = defaultdict(int)  # per-coin trade count for current day
-    daily_trades_capped = 0    # days where cap was hit
+    daily_coin_cnt   = defaultdict(int)
     current_day      = None
 
-    # For daily distribution
     trades_per_day   = defaultdict(int)
-    cap_blocked_days = set()   # days where the trade cap blocked a valid signal
-
-    cooldown_candles = config.TRADE_COOLDOWN_SECS // (5 * 60)  # in bar units
+    cap_blocked_days = set()
 
     # ── Debug counters (populated only when debug_sma=True) ──────────────────
-    dbg_slot_skip      = 0                    # 5m bars skipped: in_trade was True
-    dbg_wr_fired       = defaultdict(int)     # per coin: WR/RSI signal found
-    dbg_sma_attempted  = defaultdict(int)     # per coin: SMA scan reached (WR/RSI silent)
-    dbg_sma_fired      = defaultdict(int)     # per coin: SMA signal found
+    dbg_slot_skip      = 0
+    dbg_wr_fired       = defaultdict(int)
+    dbg_sma_attempted  = defaultdict(int)
+    dbg_sma_fired      = defaultdict(int)
 
-    # We'll iterate by 5m bar index in a global time-aligned way
-    # For per-coin we need the index of each coin at each timestamp
     print("\nRunning simulation ...")
-
-    global_bar_idx = 0
-    skip_global_until_ts = -1   # used to advance past open trade duration
 
     for ts in all_ts:
         bar_dt  = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
@@ -187,27 +178,23 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, deb
 
         # ── Daily reset ───────────────────────────────────────────────────────
         if bar_day != current_day:
-            current_day    = bar_day
-            daily_loss     = 0.0
+            current_day     = bar_day
+            daily_loss      = 0.0
             daily_trade_cnt = 0
             daily_coin_cnt.clear()
 
-        # ── If in a trade, check if it resolved on this bar ───────────────────
-        if in_trade:
-            if debug_sma:
-                dbg_slot_skip += 1
-            sym    = active_trade["symbol"]
-            sig    = active_trade["sig"]
-            sl     = active_trade["sl"]  # may be updated to entry after BE
-            tp     = active_trade["tp"]
-            i_open = active_trade["i_open"]
+        # ── Manage ALL open trades on this bar ────────────────────────────────
+        for at in list(active_trades):   # copy so we can mutate during iteration
+            sym    = at["symbol"]
+            sig    = at["sig"]
+            sl     = at["sl"]
+            tp     = at["tp"]
+            i_open = at["i_open"]
 
             if sym not in ts_to_idx or ts not in ts_to_idx[sym]:
                 continue
-
             j = ts_to_idx[sym][ts]
             df5 = coin_data[sym][0]
-
             if j <= i_open:
                 continue
 
@@ -217,57 +204,58 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, deb
             result = None
             pnl    = 0.0
 
-            # Breakeven: move SL to entry when close crosses 50% of TP distance
-            # Uses close (not high/low) to match live bot which checks current_price at candle close
-            entry_px = active_trade["entry"]
+            entry_px = at["entry"]
             halfway  = (entry_px + (tp - entry_px) * 0.5) if sig == "long" \
                        else (entry_px - (entry_px - tp) * 0.5)
             close_j  = df5.iloc[j]["close"]
-            if config.BE_ENABLED and not active_trade.get("be_triggered", False):
-                if (sig == "long" and close_j >= halfway) or (sig == "short" and close_j <= halfway):
-                    active_trade["be_triggered"] = True
-                    active_trade["sl"]           = entry_px
+            if config.BE_ENABLED and not at.get("be_triggered", False):
+                if (sig == "long" and close_j >= halfway) or \
+                        (sig == "short" and close_j <= halfway):
+                    at["be_triggered"] = True
+                    at["sl"]           = entry_px
                     sl = entry_px
 
             if sig == "long":
                 if hi >= tp:
                     result, pnl, closed = "win",   config.RISK_PER_TRADE * config.RR, True
                 elif lo <= sl:
-                    be_hit = active_trade.get("be_triggered", False)
+                    be_hit = at.get("be_triggered", False)
                     result, pnl, closed = ("breakeven", 0.0, True) if be_hit \
                                           else ("loss", -config.RISK_PER_TRADE, True)
             else:
                 if lo <= tp:
                     result, pnl, closed = "win",   config.RISK_PER_TRADE * config.RR, True
                 elif hi >= sl:
-                    be_hit = active_trade.get("be_triggered", False)
+                    be_hit = at.get("be_triggered", False)
                     result, pnl, closed = ("breakeven", 0.0, True) if be_hit \
                                           else ("loss", -config.RISK_PER_TRADE, True)
 
-            # ADX fade: if trend collapses, exit at candle close
             if not closed and config.ADX_FADE_ENABLED:
                 adx_j = df5.iloc[j]["adx"]
                 if not pd.isna(adx_j) and adx_j < config.ADX_THRESHOLD:
-                    _entry   = active_trade["entry"]
-                    _sl_dist = abs(_entry - active_trade["sl"])
+                    _entry   = at["entry"]
+                    _sl_dist = abs(_entry - at["sl"])
                     _close   = df5.iloc[j]["close"]
                     _pts     = (_close - _entry) if sig == "long" else (_entry - _close)
                     fade_pnl = config.RISK_PER_TRADE * (_pts / _sl_dist) if _sl_dist > 0 else 0.0
                     result, pnl, closed = "fade", fade_pnl, True
 
             if closed:
-                active_trade["result"]   = result
-                active_trade["pnl"]      = pnl
-                active_trade["exit_ts"]  = ts
-                active_trade["exit_idx"] = j
-                all_trades.append(dict(active_trade))
-                daily_loss      += pnl
-                cooldown_until   = ts + config.TRADE_COOLDOWN_SECS * 1000
-                in_trade         = False
-                active_trade     = None
+                at["result"]   = result
+                at["pnl"]      = pnl
+                at["exit_ts"]  = ts
+                at["exit_idx"] = j
+                all_trades.append(dict(at))
+                active_trades.remove(at)
+                daily_loss     += pnl
+                cooldown_until  = ts + config.TRADE_COOLDOWN_SECS * 1000
                 trades_per_day[bar_day] += 1
 
-            continue  # while in a trade, don't scan for new entries
+        # ── All slots full → skip signal scan ─────────────────────────────────
+        if len(active_trades) >= max_slots:
+            if debug_sma:
+                dbg_slot_skip += 1
+            continue
 
         # ── Cooldown check ────────────────────────────────────────────────────
         if ts < cooldown_until:
@@ -281,7 +269,10 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, deb
             continue
 
         # ── Scan coins in order ───────────────────────────────────────────────
+        open_syms = {at["symbol"] for at in active_trades}
         for sym in active_symbols:
+            if sym in open_syms:          # already holding this coin
+                continue
             if sym not in ts_to_idx or ts not in ts_to_idx[sym]:
                 continue
 
@@ -293,14 +284,13 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, deb
                      if sym in ts4h_arrays else -1
             d_idx = -1
             if config.REGIME_FILTER and sym in ts1d_arrays:
-                d_idx = bisect.bisect_right(ts1d_arrays[sym], ts) - 2   # previous closed daily bar
+                d_idx = bisect.bisect_right(ts1d_arrays[sym], ts) - 2
 
             sig, entry, sl, tp, strat = (None, None, None, None, None) \
                 if sma_only else bh._check_signal(
                 df5, i, df1h, h_idx, sym, df1d, d_idx, df4h, h4_idx)
             if sig is not None and debug_sma:
                 dbg_wr_fired[sym] += 1
-            # SMA fallback (or primary when --sma-only): try SMA pullback
             if sig is None and sym in ts15_arrays:
                 if debug_sma:
                     dbg_sma_attempted[sym] += 1
@@ -314,13 +304,28 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, deb
             if sig is None:
                 continue
 
+            # ── Correlation gate (two same-direction trades on correlated coins
+            #    would move together in a regime shift — block them) ───────────
+            clusters = getattr(config, "SLOT_CLUSTERS", [])
+            corr_blocked = False
+            for at in active_trades:
+                if at["sig"] == sig:
+                    for cluster in clusters:
+                        if at["symbol"] in cluster and sym in cluster:
+                            corr_blocked = True
+                            break
+                if corr_blocked:
+                    break
+            if corr_blocked:
+                continue
+
             # ── Per-coin daily cap ────────────────────────────────────────────
             if coin_daily_cap > 0 and daily_coin_cnt[sym] >= coin_daily_cap:
                 continue
 
             # ── Signal found — open trade ─────────────────────────────────────
             open_dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
-            active_trade = {
+            active_trades.append({
                 "symbol":    sym,
                 "sig":       sig,
                 "strategy":  strat,
@@ -331,11 +336,10 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, deb
                 "open_dt":   open_dt,
                 "i_open":    i,
                 "day":       bar_day,
-            }
-            in_trade          = True
+            })
             daily_trade_cnt  += 1
             daily_coin_cnt[sym] += 1
-            break  # only one trade per bar across all coins
+            break  # one new trade opened per bar
 
     # ── Handle trade still open at end of data ────────────────────────────────
     # (Mark as unresolved — excluded from stats)
