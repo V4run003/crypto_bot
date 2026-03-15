@@ -32,7 +32,7 @@ session = HTTP(
     api_secret=config.API_SECRET,
     testnet=config.TESTNET,
     demo=config.DEMO,
-    recv_window=10000,
+    recv_window=20000,
 )
 # Apply TLS 1.2 immediately after session creation
 session.client.mount("https://", _TLS12Adapter())
