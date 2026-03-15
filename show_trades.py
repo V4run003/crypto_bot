@@ -32,7 +32,7 @@ def _print_table(rows):
     total  = sum(float(r["pnl"]) for r in rows)
     wr     = wins / len(rows) * 100 if rows else 0
 
-    header = f"{'#':>4}  {'Date/Time':^19}  {'Symbol':^10}  {'Side':^5}  {'Strat':^5}  {'Entry':^5}  {'Entry $':>10}  {'Exit $':>10}  {'PnL':>8}  {'Dur':>6}  Reason"
+    header = f"{'#':>4}  {'Date/Time':^19}  {'Symbol':^10}  {'Side':^5}  {'Strat':^5}  {'Entry':^5}  {'Entry $':>10}  {'Exit $':>10}  {'PnL':>8}  {'Dur':>6}  {'Ver':^7}  Reason"
     sep    = "─" * len(header)
     print(sep)
     print(header)
@@ -47,7 +47,7 @@ def _print_table(rows):
             f"{i:>4}  {r['datetime']:^19}  {r['symbol']:^10}  "
             f"{r['side']:^5}  {r['strategy']:^5}  {r['entry_type'][:5]:^5}  "
             f"{float(r['entry']):>10,.4f}  {float(r['exit']):>10,.4f}  "
-            f"{pnl:>+8,.2f} {flag}  {dur_str:>6}  {r['close_reason']}"
+            f"{pnl:>+8,.2f} {flag}  {dur_str:>6}  {r.get('version', '?'):^7}  {r['close_reason']}"
         )
 
     print(sep)

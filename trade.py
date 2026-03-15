@@ -46,8 +46,11 @@ def open_long(symbol, entry, sl, tp):
     if qty is None:
         logger.warning("%s: calculated qty below exchange minimum — skipping long", symbol)
         return None
-    entry_r    = exchange.round_price(symbol, entry)
-    order_info = exchange.place_order(symbol, "Buy", qty, sl=sl_r, tp=tp_r, limit_price=entry_r)
+    offset  = getattr(config, "LIMIT_ENTRY_OFFSET_PCT", 0.0)
+    limit_p = entry * (1 - offset)
+    entry_r = exchange.round_price(symbol, entry)
+    limit_r = exchange.round_price(symbol, limit_p)
+    order_info = exchange.place_order(symbol, "Buy", qty, sl=sl_r, tp=tp_r, limit_price=limit_r)
     entry_type = order_info.get("entry_type", "market")
     wait_secs  = order_info.get("wait_secs", 0.0)
     logger.info(
@@ -69,8 +72,11 @@ def open_short(symbol, entry, sl, tp):
     if qty is None:
         logger.warning("%s: calculated qty below exchange minimum — skipping short", symbol)
         return None
-    entry_r    = exchange.round_price(symbol, entry)
-    order_info = exchange.place_order(symbol, "Sell", qty, sl=sl_r, tp=tp_r, limit_price=entry_r)
+    offset  = getattr(config, "LIMIT_ENTRY_OFFSET_PCT", 0.0)
+    limit_p = entry * (1 + offset)
+    entry_r = exchange.round_price(symbol, entry)
+    limit_r = exchange.round_price(symbol, limit_p)
+    order_info = exchange.place_order(symbol, "Sell", qty, sl=sl_r, tp=tp_r, limit_price=limit_r)
     entry_type = order_info.get("entry_type", "market")
     wait_secs  = order_info.get("wait_secs", 0.0)
     logger.info(
