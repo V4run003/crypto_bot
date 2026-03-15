@@ -72,6 +72,11 @@ REGIME_FILTER_EXCLUDED = []
 # Resets automatically when the next trade fires.  Set 0 to disable.
 DROUGHT_ALERT_HOURS    = 6
 
+# ── BTC 4H regime Telegram alert ─────────────────────────────────────────────
+# Fires when BTC 4H price crosses the EMA200 (bull ↔ bear flip).
+# Alert only — zero impact on trading behaviour.
+REGIME_ALERT_ENABLED   = True
+
 USE_LIMIT_ENTRY          = True
 LIMIT_ORDER_TIMEOUT_SECS = 30
 

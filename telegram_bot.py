@@ -240,6 +240,25 @@ def notify_signal_drought(hours: float):
     )
 
 
+def notify_regime_change(regime: str):
+    """Alert when BTC 4H price crosses the EMA200 (bull/bear flip)."""
+    if regime == "bear":
+        send(
+            f"⚠️ <b>BTC 4H Regime: BEAR</b>  —  {_ts()}\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"Price crossed <b>below</b> the 4H EMA200.\n"
+            f"Expect fewer signals and lower WR until regime recovers.\n"
+            f"Bot continues running normally.\n"
+        )
+    else:
+        send(
+            f"✅ <b>BTC 4H Regime: BULL</b>  —  {_ts()}\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"Price crossed <b>above</b> the 4H EMA200.\n"
+            f"Normal signal frequency expected to resume.\n"
+        )
+
+
 def notify_error(title: str, detail: str):
     short = detail[:800] if len(detail) > 800 else detail
     send(

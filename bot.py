@@ -12,11 +12,14 @@ log_module.setup()   # configure formatters before any other module logs
 import config
 import exchange
 import risk
+import strategy
 import position_manager
 import scanner
 import telegram_bot
 
 _logger = logging.getLogger("bot")
+
+_btc_4h_regime = None   # last known BTC 4H regime — used to detect crossovers
 
 
 def sync_clock():
@@ -145,6 +148,7 @@ def main():
             if trade_opened:
                 _last_signal_time = now_utc
                 _drought_alerted  = False
+            _check_btc_4h_regime()
 
             # ── Signal drought alert ──────────────────────────────────────────
             drought_hours = getattr(config, "DROUGHT_ALERT_HOURS", 6)
@@ -166,6 +170,24 @@ def main():
             detail = traceback.format_exc()
             _logger.error("Unhandled error: %s", exc, exc_info=True)
             telegram_bot.notify_error("Unhandled Bot Error", detail)
+
+
+def _check_btc_4h_regime():
+    """Fetch BTC 4H candles and send a Telegram alert if the regime has flipped."""
+    global _btc_4h_regime
+    if not getattr(config, "REGIME_ALERT_ENABLED", False):
+        return
+    try:
+        candles_4h = exchange.get_candles_4h("BTCUSDT")
+        regime = strategy.get_btc_4h_regime(candles_4h)
+        if regime is None:
+            return
+        if _btc_4h_regime is not None and regime != _btc_4h_regime:
+            telegram_bot.notify_regime_change(regime)
+            _logger.info("BTC 4H regime changed: %s → %s", _btc_4h_regime, regime)
+        _btc_4h_regime = regime
+    except Exception as exc:
+        _logger.warning("BTC 4H regime check failed: %s", exc)
 
 
 def _send_daily_report(report_day):

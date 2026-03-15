@@ -195,6 +195,17 @@ def get_regime(candles_1d, symbol=None):
         return "neutral"
 
 
+def get_btc_4h_regime(candles_4h):
+    """
+    Return 'bull' or 'bear' based on BTC 4H close vs EMA200, or None on error.
+    Used for regime-change Telegram alerts (no trading behaviour is changed).
+    """
+    price, ema = _get_htf_ema(candles_4h)
+    if price is None or ema is None or pd.isna(ema):
+        return None
+    return "bull" if price > ema else "bear"
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _prepare_df(candles):
