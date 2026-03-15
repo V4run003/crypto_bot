@@ -250,7 +250,7 @@ def _place_market_order(symbol, side, qty, sl=None, tp=None):
     }
     if sl is not None:
         params["stopLoss"]    = str(sl)
-        params["slTriggerBy"] = "LastPrice"
+        params["slTriggerBy"] = "MarkPrice"
     if tp is not None:
         params["takeProfit"]  = str(tp)
         params["tpTriggerBy"] = "LastPrice"
@@ -275,7 +275,7 @@ def _try_limit_order(symbol, side, qty, price, sl, tp):
     }
     if sl is not None:
         params["stopLoss"]    = str(sl)
-        params["slTriggerBy"] = "LastPrice"
+        params["slTriggerBy"] = "MarkPrice"
     if tp is not None:
         params["takeProfit"]  = str(tp)
         params["tpTriggerBy"] = "LastPrice"

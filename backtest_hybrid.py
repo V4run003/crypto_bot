@@ -185,7 +185,7 @@ def _build_daily_indicators(df):
 
 # ── Shared pre-checks (same for both WR and RSI) ─────────────────────────────
 
-def _passes_common_filters(df5, i, df1h, h_idx):
+def _passes_common_filters(df5, i, df1h, h_idx, symbol=None):
     """
     Returns (passes, price, ema5, atr, htf_long_ok, htf_short_ok) or
     (False, ...) if any shared filter rejects the bar.
@@ -223,11 +223,13 @@ def _passes_common_filters(df5, i, df1h, h_idx):
             return False, None, None, None, None, None
 
     if config.TIME_FILTER:
-        bar_hour = datetime.fromtimestamp(
-            int(df5["timestamp"].iloc[i]) / 1000, tz=timezone.utc
-        ).hour
-        if bar_hour < config.TIME_FILTER_START or bar_hour >= config.TIME_FILTER_END:
-            return False, None, None, None, None, None
+        excl_time = getattr(config, "TIME_FILTER_EXCLUDED", [])
+        if symbol is None or symbol not in excl_time:
+            bar_hour = datetime.fromtimestamp(
+                int(df5["timestamp"].iloc[i]) / 1000, tz=timezone.utc
+            ).hour
+            if bar_hour < config.TIME_FILTER_START or bar_hour >= config.TIME_FILTER_END:
+                return False, None, None, None, None, None
 
     if config.EMA50_PULLBACK_FILTER and not pd.isna(ema50):
         if abs(price - ema50) > config.EMA50_PULLBACK_ATR_MULT * atr:
@@ -357,7 +359,7 @@ def _check_wr_signal(df5, i, price, ema5, htf_long_ok, htf_short_ok):
 
 def _check_signal(df5, i, df1h, h_idx, symbol, df1d=None, d_idx=-1, df4h=None, h4_idx=-1):
     ok, price, ema5, atr, htf_long_ok, htf_short_ok = \
-        _passes_common_filters(df5, i, df1h, h_idx)
+        _passes_common_filters(df5, i, df1h, h_idx, symbol)
     if not ok:
         return None, None, None, None, None
 

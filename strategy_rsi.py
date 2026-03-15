@@ -102,7 +102,8 @@ def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
             return _no_signal(adx=adx)
 
     # Time-of-day filter
-    if config.TIME_FILTER:
+    excl_time = getattr(config, "TIME_FILTER_EXCLUDED", [])
+    if config.TIME_FILTER and (symbol is None or symbol not in excl_time):
         bar_hour = datetime.fromtimestamp(
             float(row["timestamp"]) / 1000, tz=timezone.utc
         ).hour

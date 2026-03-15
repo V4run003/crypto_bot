@@ -199,11 +199,13 @@ def _check_signal(df5, i5, df15, i15, df1h, h_idx, df4h, h4_idx, symbol):
             return None, None, None, None
 
     if config.TIME_FILTER:
-        bar_hour = datetime.fromtimestamp(
-            int(df5["timestamp"].iloc[i5]) / 1000, tz=timezone.utc
-        ).hour
-        if bar_hour < config.TIME_FILTER_START or bar_hour >= config.TIME_FILTER_END:
-            return None, None, None, None
+        excl_time = getattr(config, "TIME_FILTER_EXCLUDED", [])
+        if symbol is None or symbol not in excl_time:
+            bar_hour = datetime.fromtimestamp(
+                int(df5["timestamp"].iloc[i5]) / 1000, tz=timezone.utc
+            ).hour
+            if bar_hour < config.TIME_FILTER_START or bar_hour >= config.TIME_FILTER_END:
+                return None, None, None, None
 
     # ── 1H filter ────────────────────────────────────────────────────────────
     row_1h   = df1h.iloc[h_idx]
