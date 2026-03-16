@@ -1,3 +1,19 @@
+"""
+strategy_rsi.py  —  RSI Pullback in Trend strategy.
+
+Signal logic (closed-candle, no look-ahead bias):
+  LONG:  5m price > EMA200  AND  1H price > 1H EMA200  AND  ADX ≥ threshold
+         AND  ATR > ATR_MA  AND  RSI_LONG_ZONE_LOW ≤ rsi ≤ RSI_LONG_ZONE_HIGH
+         AND  rsi > rsi_prev  (RSI turning up after the pullback)
+
+  SHORT: 5m price < EMA200  AND  1H price < 1H EMA200  AND  ADX ≥ threshold
+         AND  ATR > ATR_MA  AND  RSI_SHORT_ZONE_LOW ≤ rsi ≤ RSI_SHORT_ZONE_HIGH
+         AND  rsi < rsi_prev  (RSI turning down after the bounce)
+
+SL / TP use the same swing-based calc as the WR strategy.
+All shared filters (ADX rising, time, EMA50 pullback, HTF) are honoured.
+"""
+
 import logging
 from datetime import datetime, timezone
 
@@ -12,8 +28,7 @@ logger = logging.getLogger(__name__)
 def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
     """
     Evaluate the most recently *closed* candle (iloc[-2]) against all
-    strategy rules.  Using [-2] instead of [-1] prevents look-ahead bias
-    and signal repainting on the forming candle.
+    RSI pullback strategy rules.
 
     Returns a dict:
         {signal: "long"|"short"|None, entry, sl, tp, adx, atr}
@@ -48,7 +63,7 @@ def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
 
     # ── Closed signal candle values (iloc[-2]) ────────────────────────────────
     row      = df.iloc[-2]
-    row_prev = df.iloc[-3]   # for ADX-rising filter
+    row_prev = df.iloc[-3]
     price    = row["close"]
     ema      = row["ema200"]
     ema50    = row["ema50"]
@@ -56,13 +71,15 @@ def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
     adx_prev = row_prev["adx"]
     atr      = row["atr"]
     atr_ma   = row["atr_ma"]
+    rsi      = row["rsi"]
+    rsi_prev = row_prev["rsi"]
 
-    if any(pd.isna(v) for v in [price, ema, adx, atr, atr_ma]):
+    if any(pd.isna(v) for v in [price, ema, adx, atr, atr_ma, rsi, rsi_prev]):
         return _no_signal()
 
     logger.debug(
-        "[closed] price=%.4f  ema=%.4f  adx=%.2f  atr=%.6f  atr_ma=%.6f",
-        price, ema, adx, atr, atr_ma,
+        "[closed] price=%.4f  ema=%.4f  adx=%.2f  rsi=%.2f  rsi_prev=%.2f",
+        price, ema, adx, rsi, rsi_prev,
     )
 
     # Volatility filter — skip flat markets
@@ -73,7 +90,7 @@ def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
     if adx <= config.ADX_THRESHOLD:
         return _no_signal(adx=adx)
 
-    # ADX rising filter — momentum must be increasing
+    # ADX rising filter
     if config.ADX_RISING_FILTER and not pd.isna(adx_prev) and adx <= adx_prev:
         return _no_signal(adx=adx)
 
@@ -84,7 +101,7 @@ def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
                 and adx > adx_prev and adx_prev > adx_prev2):
             return _no_signal(adx=adx)
 
-    # Time-of-day filter — only trade during liquid hours
+    # Time-of-day filter
     excl_time = getattr(config, "TIME_FILTER_EXCLUDED", [])
     if config.TIME_FILTER and (symbol is None or symbol not in excl_time):
         bar_hour = datetime.fromtimestamp(
@@ -93,7 +110,7 @@ def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
         if bar_hour < config.TIME_FILTER_START or bar_hour >= config.TIME_FILTER_END:
             return _no_signal(adx=adx)
 
-    # EMA50 pullback filter — price must be within N ATR of EMA50
+    # EMA50 pullback filter
     if config.EMA50_PULLBACK_FILTER and not pd.isna(ema50):
         if abs(price - ema50) > config.EMA50_PULLBACK_ATR_MULT * atr:
             return _no_signal(adx=adx)
@@ -107,8 +124,10 @@ def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
     prev_high = float(df["high"].iloc[-3])
     prev_low  = float(df["low"].iloc[-3])
 
-    # ── Long: 5m price above EMA200, 1H aligned, selling-exhaustion hook ──────
-    if price > ema and htf_long_ok and _wr_exhaustion_long(df):
+    # ── Long: uptrend + RSI pulled back into zone + RSI turning up ───────────
+    if (price > ema and htf_long_ok
+            and config.RSI_LONG_ZONE_LOW <= rsi <= config.RSI_LONG_ZONE_HIGH
+            and rsi > rsi_prev):
         if config.CANDLE_CONFIRM_FILTER and price <= prev_high:
             return _no_signal(adx=adx)   # candle hasn't broken above prev high yet
         if config.RESISTANCE_FILTER:
@@ -124,8 +143,10 @@ def check_signal(candles_5m, candles_1h, candles_4h=None, symbol=None):
         return {"signal": "long",  "entry": price, "sl": sl, "tp": tp,
                 "adx": adx, "atr": atr}
 
-    # ── Short: 5m price below EMA200, 1H aligned, buying-exhaustion hook ──────
-    if price < ema and htf_short_ok and _wr_exhaustion_short(df):
+    # ── Short: downtrend + RSI bounced into zone + RSI turning down ──────────
+    if (price < ema and htf_short_ok
+            and config.RSI_SHORT_ZONE_LOW <= rsi <= config.RSI_SHORT_ZONE_HIGH
+            and rsi < rsi_prev):
         if config.CANDLE_CONFIRM_FILTER and price >= prev_low:
             return _no_signal(adx=adx)   # candle hasn't broken below prev low yet
         if config.RESISTANCE_FILTER:
@@ -152,60 +173,6 @@ def check_adx(candles_5m):
     return float(df["adx"].iloc[-1])
 
 
-def get_regime(candles_1d, symbol=None):
-    """
-    Classify the current daily trend as 'bull', 'bear', or 'neutral'.
-
-      bull    = daily close > EMA × (1 + REGIME_NEUTRAL_PCT)  → take longs only
-      bear    = daily close < EMA × (1 - REGIME_NEUTRAL_PCT)  → take shorts only
-      neutral = price within ±REGIME_NEUTRAL_PCT band         → take both
-
-    Uses iloc[-2] (last fully-closed daily bar) to avoid look-ahead on the
-    still-forming today candle.  Fails open ('neutral') on any error so the
-    bot keeps trading rather than going silent on a data hiccup.
-    """
-    if not config.REGIME_FILTER:
-        return "neutral"
-    excluded = getattr(config, "REGIME_FILTER_EXCLUDED", [])
-    if symbol and symbol in excluded:
-        return "neutral"
-    try:
-        df = pd.DataFrame(
-            candles_1d,
-            columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"],
-        )
-        df = df.iloc[::-1].reset_index(drop=True)   # oldest → newest
-        df["close"] = df["close"].astype(float)
-        n = config.REGIME_EMA_PERIOD
-        if len(df) < n + 2:          # need at least n+1 bars + 1 closed bar
-            return "neutral"
-        ema_series = ta.trend.ema_indicator(df["close"], window=n)
-        ema_val = float(ema_series.iloc[-2])   # last CLOSED daily bar
-        price   = float(df["close"].iloc[-2])
-        if pd.isna(ema_val):
-            return "neutral"
-        band = config.REGIME_NEUTRAL_PCT
-        if price > ema_val * (1 + band):
-            return "bull"
-        if price < ema_val * (1 - band):
-            return "bear"
-        return "neutral"
-    except Exception as exc:
-        logger.warning("get_regime error: %s", exc)
-        return "neutral"
-
-
-def get_btc_4h_regime(candles_4h):
-    """
-    Return 'bull' or 'bear' based on BTC 4H close vs EMA200, or None on error.
-    Used for regime-change Telegram alerts (no trading behaviour is changed).
-    """
-    price, ema = _get_htf_ema(candles_4h)
-    if price is None or ema is None or pd.isna(ema):
-        return None
-    return "bull" if price > ema else "bear"
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _prepare_df(candles):
@@ -221,9 +188,9 @@ def _prepare_df(candles):
         df["ema200"] = ta.trend.ema_indicator(df["close"], window=200)
         df["ema50"]  = ta.trend.ema_indicator(df["close"], window=50)
         df["adx"]    = ta.trend.adx(df["high"], df["low"], df["close"], window=14)
-        df["wr"]       = ta.momentum.williams_r(df["high"], df["low"], df["close"], lbp=14)
-        df["atr"]      = ta.volatility.average_true_range(
-                             df["high"], df["low"], df["close"], window=config.ATR_PERIOD)
+        df["rsi"]     = ta.momentum.rsi(df["close"], window=config.RSI_PERIOD)
+        df["atr"]     = ta.volatility.average_true_range(
+                            df["high"], df["low"], df["close"], window=config.ATR_PERIOD)
         df["atr_ma"]   = df["atr"].rolling(config.ATR_MA_PERIOD).mean()
         df["vol_ma20"] = df["volume"].rolling(20).mean()
         return df
@@ -256,33 +223,3 @@ def _get_1h_ema(candles_1h):
 def _no_signal(adx=None):
     return {"signal": None, "entry": None, "sl": None, "tp": None,
             "adx": adx, "atr": None}
-
-
-def _wr_exhaustion_long(df):
-    """
-    Selling exhaustion — long hook (closed-candle version):
-    - The WR_EXHAUSTION_LOOKBACK candles *before* the signal candle (iloc[-2])
-      were ALL below -80 (deep oversold).
-    - The signal candle (iloc[-2]) has WR crossing back *above* -80.
-    """
-    wr       = df["wr"]
-    lookback = config.WR_EXHAUSTION_LOOKBACK
-    if wr.iloc[-2] <= -80:               # signal candle still in zone — no hook
-        return False
-    prev = wr.iloc[-(lookback + 2):-2]   # candles before the signal candle
-    return (prev < -80).sum() >= lookback
-
-
-def _wr_exhaustion_short(df):
-    """
-    Buying exhaustion — short hook (closed-candle version):
-    - The WR_EXHAUSTION_LOOKBACK candles before the signal candle were ALL
-      above -20 (deep overbought).
-    - The signal candle (iloc[-2]) has WR crossing back *below* -20.
-    """
-    wr       = df["wr"]
-    lookback = config.WR_EXHAUSTION_LOOKBACK
-    if wr.iloc[-2] >= -20:               # still in zone — no hook
-        return False
-    prev = wr.iloc[-(lookback + 2):-2]
-    return (prev > -20).sum() >= lookback

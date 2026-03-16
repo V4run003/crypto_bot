@@ -39,12 +39,17 @@ def _fetch_symbols() -> list:
         resp    = exchange.session.get_tickers(category="linear")
         tickers = resp["result"]["list"]
 
-        # Only scan APPROVED_COINS that also pass the volume threshold
-        approved = set(config.APPROVED_COINS)
+        # Only scan APPROVED_COINS that also pass the volume threshold.
+        # VOLUME_FILTER_EXCLUDED coins bypass the threshold (e.g. PAXG — gold-pegged, low but real volume).
+        approved      = set(config.APPROVED_COINS)
+        vol_excluded  = set(getattr(config, "VOLUME_FILTER_EXCLUDED", []))
         candidates = [
             t for t in tickers
             if t["symbol"] in approved
-            and float(t.get("turnover24h", 0)) >= config.VOLUME_FILTER_USD
+            and (
+                t["symbol"] in vol_excluded
+                or float(t.get("turnover24h", 0)) >= config.VOLUME_FILTER_USD
+            )
         ]
         candidates.sort(key=lambda x: float(x.get("turnover24h", 0)), reverse=True)
         symbols = [t["symbol"] for t in candidates]

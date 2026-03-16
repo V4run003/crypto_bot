@@ -32,7 +32,7 @@ session = HTTP(
     api_secret=config.API_SECRET,
     testnet=config.TESTNET,
     demo=config.DEMO,
-    recv_window=10000,
+    recv_window=20000,
 )
 # Apply TLS 1.2 immediately after session creation
 session.client.mount("https://", _TLS12Adapter())
@@ -108,6 +108,28 @@ def get_candles_1h(symbol):
         category="linear",
         symbol=symbol,
         interval=60,
+        limit=250,
+    )
+    return data["result"]["list"]
+
+
+def get_candles_4h(symbol):
+    """Fetch the latest 250 4-hour candles for the 4H EMA200 trend filter."""
+    data = session.get_kline(
+        category="linear",
+        symbol=symbol,
+        interval=240,
+        limit=250,
+    )
+    return data["result"]["list"]
+
+
+def get_candles_daily(symbol):
+    """Fetch the latest 250 daily candles for regime detection."""
+    data = session.get_kline(
+        category="linear",
+        symbol=symbol,
+        interval="D",
         limit=250,
     )
     return data["result"]["list"]
@@ -197,17 +219,23 @@ def set_leverage(symbol, leverage):
 
 def place_order(symbol, side, qty, sl=None, tp=None, limit_price=None):
     """
-    Place an entry order.  If USE_LIMIT_ENTRY is True and limit_price is given,
-    tries a post-only limit first (maker fee 0.02%).  If the limit is rejected
-    or not filled within LIMIT_ORDER_TIMEOUT_SECS, cancels it and falls back to
-    a market order (taker fee 0.06%).
+    Place an entry order.  If limit_price is given, tries a post-only limit
+    first (maker fee 0.02%).  If the limit is rejected or not filled within
+    LIMIT_ORDER_TIMEOUT_SECS, cancels it and falls back to a market order
+    (taker fee 0.06%).  Pass limit_price=None to always use market.
+
+    Returns dict: {"entry_type": "limit"|"market", "wait_secs": float}
     """
-    if config.USE_LIMIT_ENTRY and limit_price is not None:
-        filled = _try_limit_order(symbol, side, qty, limit_price, sl, tp)
-        if filled:
-            return filled
+    if limit_price is not None:
+        result = _try_limit_order(symbol, side, qty, limit_price, sl, tp)
+        if result["filled"]:
+            return {"entry_type": "limit", "wait_secs": result["wait_secs"]}
+        wait_secs = result["wait_secs"]
         logger.info("%s: limit unfilled/rejected — falling back to market", symbol)
-    return _place_market_order(symbol, side, qty, sl, tp)
+        _place_market_order(symbol, side, qty, sl, tp)
+        return {"entry_type": "market", "wait_secs": wait_secs}
+    _place_market_order(symbol, side, qty, sl, tp)
+    return {"entry_type": "market", "wait_secs": 0.0}
 
 
 def _place_market_order(symbol, side, qty, sl=None, tp=None):
@@ -222,7 +250,7 @@ def _place_market_order(symbol, side, qty, sl=None, tp=None):
     }
     if sl is not None:
         params["stopLoss"]    = str(sl)
-        params["slTriggerBy"] = "LastPrice"
+        params["slTriggerBy"] = "MarkPrice"
     if tp is not None:
         params["takeProfit"]  = str(tp)
         params["tpTriggerBy"] = "LastPrice"
@@ -232,9 +260,10 @@ def _place_market_order(symbol, side, qty, sl=None, tp=None):
 def _try_limit_order(symbol, side, qty, price, sl, tp):
     """
     Place a post-only limit order at `price`.  Poll until filled or timeout.
-    Returns the order response dict on fill, or None on rejection/timeout.
+    Returns {"filled": bool, "wait_secs": float} always.
     """
     import time
+    start = time.monotonic()
     params = {
         "category":    "linear",
         "symbol":      symbol,
@@ -246,7 +275,7 @@ def _try_limit_order(symbol, side, qty, price, sl, tp):
     }
     if sl is not None:
         params["stopLoss"]    = str(sl)
-        params["slTriggerBy"] = "LastPrice"
+        params["slTriggerBy"] = "MarkPrice"
     if tp is not None:
         params["takeProfit"]  = str(tp)
         params["tpTriggerBy"] = "LastPrice"
@@ -258,7 +287,7 @@ def _try_limit_order(symbol, side, qty, price, sl, tp):
     except Exception as exc:
         # PostOnly rejected immediately (would cross the spread) — skip straight to market
         logger.info("%s: PostOnly limit rejected (%s)", symbol, exc)
-        return None
+        return {"filled": False, "wait_secs": 0.0}
 
     # Poll for fill
     deadline = time.monotonic() + config.LIMIT_ORDER_TIMEOUT_SECS
@@ -272,21 +301,23 @@ def _try_limit_order(symbol, side, qty, price, sl, tp):
             if orders:
                 status = orders[0]["orderStatus"]
                 if status == "Filled":
-                    logger.info("%s: limit order filled (maker fee)", symbol)
-                    return orders[0]
+                    wait = time.monotonic() - start
+                    logger.info("%s: limit order filled in %.0fs (maker fee)", symbol, wait)
+                    return {"filled": True, "wait_secs": wait}
                 if status in ("Cancelled", "Rejected", "Deactivated"):
                     logger.info("%s: limit order %s", symbol, status)
-                    return None
+                    return {"filled": False, "wait_secs": time.monotonic() - start}
         except Exception as exc:
             logger.warning("%s: order status poll failed: %s", symbol, exc)
 
     # Timeout — cancel the unfilled limit then fall back
+    wait = time.monotonic() - start
     try:
         session.cancel_order(category="linear", symbol=symbol, orderId=order_id)
         logger.info("%s: limit order cancelled (timeout %ds)", symbol, config.LIMIT_ORDER_TIMEOUT_SECS)
     except Exception as exc:
         logger.warning("%s: cancel_order failed: %s", symbol, exc)
-    return None
+    return {"filled": False, "wait_secs": wait}
 
 
 def set_trading_stop(symbol, stop_loss=None, take_profit=None):

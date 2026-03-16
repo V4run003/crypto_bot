@@ -36,14 +36,20 @@ def update_peak_balance():
 
 def trailing_dd_remaining() -> float:
     """
-    How many USD remain before hitting the CFT trailing drawdown floor.
-    Floor = peak_balance × (1 - TRAILING_DD_PCT)
-    Returns a large number if balance data unavailable.
+    How many USD remain before hitting the drawdown floor.
+
+    TRAILING_DD = True  (default): floor = peak_balance × (1 - TRAILING_DD_PCT)
+                                   Floor rises as the account grows.
+    TRAILING_DD = False           : floor = ACCOUNT_SIZE × (1 - TRAILING_DD_PCT)
+                                   Fixed floor — matches 2-phase prop-firm rules.
     """
-    if _peak_balance <= 0:
-        return 9999.0
-    floor   = _peak_balance * (1 - config.TRAILING_DD_PCT)
     current = _get_balance()
+    if getattr(config, "TRAILING_DD", True):
+        if _peak_balance <= 0:
+            return 9999.0
+        floor = _peak_balance * (1 - config.TRAILING_DD_PCT)
+    else:
+        floor = config.ACCOUNT_SIZE * (1 - config.TRAILING_DD_PCT)
     return current - floor
 
 

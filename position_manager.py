@@ -5,7 +5,9 @@ Tracks the single open trade and handles the full position lifecycle:
   - ADX-fade early exits (only after minimum trade duration)
   - Detecting SL/TP closures and reporting PnL
 """
+import csv
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,27 +20,46 @@ import telegram_bot
 
 logger = logging.getLogger(__name__)
 
-_current_trade:   Optional[dict]     = None
-_breakeven_moved: bool               = False
-_trade_open_time: Optional[datetime] = None
+_trades:            list               = []   # all currently open trade dicts
+_breakeven_moved:   set                = set()  # symbols whose SL was moved to BE
+_trade_open_times:  dict               = {}     # symbol -> datetime opened
 
 
 # ── Public interface ──────────────────────────────────────────────────────────
 
 def is_position_open() -> bool:
-    return _current_trade is not None
+    """True if at least one slot is occupied."""
+    return len(_trades) > 0
+
+
+def has_free_slot() -> bool:
+    """True if another trade can be opened."""
+    max_slots = getattr(config, "MAX_OPEN_SLOTS", 1)
+    return len(_trades) < max_slots
+
+
+def get_open_symbols() -> set:
+    """Set of symbols currently held (scanner uses this to skip them)."""
+    return {t["symbol"] for t in _trades}
+
+
+def get_open_trades() -> list:
+    """Snapshot of all open trade dicts (for correlation checks)."""
+    return list(_trades)
 
 
 def get_current_trade() -> Optional[dict]:
-    return _current_trade
+    """Backward-compat: return first open trade, or None."""
+    return _trades[0] if _trades else None
 
 
 def set_trade(info: dict):
-    """Register a newly opened trade."""
-    global _current_trade, _breakeven_moved, _trade_open_time
-    _current_trade   = info
-    _breakeven_moved = False
-    _trade_open_time = datetime.now(timezone.utc)
+    """Register a newly opened trade (appends to the active slots)."""
+    global _trades, _breakeven_moved, _trade_open_times
+    sym = info["symbol"]
+    _trades.append(info)
+    _breakeven_moved.discard(sym)
+    _trade_open_times[sym] = datetime.now(timezone.utc)
     logger.info(
         "Trade registered: %s %s  qty=%s  entry=%.4f  sl=%s  tp=%s",
         info["symbol"], info["side"], info["qty"],
@@ -55,100 +76,117 @@ def set_trade(info: dict):
             entry=float(info["entry"]), sl=float(info["sl"]), tp=float(info["tp"]),
             qty=float(info["qty"]), balance=bal,
             trade_count=s["trade_count"],
+            strategy=info.get("strategy", "WR"),
+            entry_type=info.get("entry_type", "market"),
+            wait_secs=float(info.get("wait_secs", 0.0)),
         )
     except Exception as exc:
         logger.warning("Telegram notify_trade_opened failed: %s", exc)
 
 
-def clear_trade():
-    """Wipe internal trade state (call after position is confirmed closed)."""
-    global _current_trade, _breakeven_moved, _trade_open_time
-    _current_trade   = None
-    _breakeven_moved = False
-    _trade_open_time = None
+def clear_trade(symbol: Optional[str] = None):
+    """Remove a trade from the active list.
+    Pass symbol to remove a specific trade; omit to clear ALL (legacy).
+    """
+    global _trades, _breakeven_moved, _trade_open_times
+    if symbol is None:
+        _trades.clear()
+        _breakeven_moved.clear()
+        _trade_open_times.clear()
+    else:
+        _trades = [t for t in _trades if t["symbol"] != symbol]
+        _breakeven_moved.discard(symbol)
+        _trade_open_times.pop(symbol, None)
 
 
-def check_open_position():
-    """Query the exchange for the tracked position; returns pos dict or None."""
-    if _current_trade is None:
-        return None
-    return exchange.get_position(_current_trade["symbol"])
+def check_open_position(symbol: str):
+    """Query the exchange for a specific tracked symbol; returns pos dict or None."""
+    return exchange.get_position(symbol)
 
 
-def enforce_minimum_trade_time() -> bool:
+def enforce_minimum_trade_time(symbol: str) -> bool:
     """Return True when the position has been open for >= MIN_TRADE_DURATION_SECS."""
-    if _trade_open_time is None:
+    open_time = _trade_open_times.get(symbol)
+    if open_time is None:
         return True
-    elapsed = (datetime.now(timezone.utc) - _trade_open_time).total_seconds()
+    elapsed = (datetime.now(timezone.utc) - open_time).total_seconds()
     if elapsed < config.MIN_TRADE_DURATION_SECS:
         logger.debug(
-            "Min trade duration not yet reached (%.0f / %d s)",
-            elapsed, config.MIN_TRADE_DURATION_SECS,
+            "Min trade duration not yet reached on %s (%.0f / %d s)",
+            symbol, elapsed, config.MIN_TRADE_DURATION_SECS,
         )
         return False
     return True
 
 
-def move_stop_to_breakeven():
+def move_stop_to_breakeven(symbol: str):
     """Move the open trade's stop-loss to the entry price."""
-    global _breakeven_moved
-    if _current_trade is None or _breakeven_moved:
+    trade_info = next((t for t in _trades if t["symbol"] == symbol), None)
+    if trade_info is None or symbol in _breakeven_moved:
         return
-    trade.move_to_breakeven(_current_trade["symbol"], _current_trade["entry"])
-    _current_trade["sl"] = _current_trade["entry"]
-    _breakeven_moved     = True
-    logger.info("Stop moved to breakeven on %s", _current_trade["symbol"])
+    trade.move_to_breakeven(symbol, trade_info["entry"])
+    trade_info["sl"] = trade_info["entry"]
+    _breakeven_moved.add(symbol)
+    logger.info("Stop moved to breakeven on %s", symbol)
 
 
 def manage() -> bool:
     """
-    Called each scan cycle while a trade is open.
-
-    Returns True  — position still open.
-    Returns False — position was closed (SL/TP or early exit).
+    Called each scan cycle.  Manages ALL open slots.
+    Returns True if at least one position is still open.
     """
-    global _current_trade
+    for t in list(_trades):   # copy: _trades may shrink during iteration
+        _manage_one(t)
+    return len(_trades) > 0
 
-    pos = check_open_position()
+
+def _manage_one(trade_info: dict) -> bool:
+    """
+    Manage a single open trade.
+    Returns True — position still open.
+    Returns False — position was closed.
+    """
+    symbol = trade_info["symbol"]
+    pos = check_open_position(symbol)
     if pos is None:
-        _on_position_closed()
+        _on_position_closed(trade_info)
         return False
 
-    symbol = _current_trade["symbol"]
-    side   = _current_trade["side"]
-    entry  = _current_trade["entry"]
-    tp     = _current_trade.get("original_tp") or _current_trade["tp"]
+    side   = trade_info["side"]
+    entry  = trade_info["entry"]
+    tp     = trade_info.get("original_tp") or trade_info["tp"]
 
     try:
         candles_5m    = exchange.get_candles(symbol)
-        # Use the latest close as current market price (management, not signal)
         current_price = float(candles_5m[0][4])
         adx_now       = strategy.check_adx(candles_5m)
 
         # ── Breakeven at 50 % of TP distance ─────────────────────────────────
-        if not _breakeven_moved:
+        if config.BE_ENABLED and symbol not in _breakeven_moved:
             halfway = entry + (tp - entry) * 0.5
             triggered = (
                 (side == "Buy"  and current_price >= halfway) or
                 (side == "Sell" and current_price <= halfway)
             )
             if triggered:
-                move_stop_to_breakeven()
+                move_stop_to_breakeven(symbol)
 
-        # ── ADX-fade early exit (prop-firm minimum time respected) ────────────
-        if adx_now is not None and adx_now < 20 and enforce_minimum_trade_time():
-            logger.info(
-                "ADX faded to %.2f on %s — closing early", adx_now, symbol
-            )
+        # ── ADX-fade early exit ───────────────────────────────────────────────
+        if (config.ADX_FADE_ENABLED
+                and adx_now is not None
+                and adx_now < config.ADX_THRESHOLD
+                and enforce_minimum_trade_time(symbol)):
+            logger.info("ADX faded to %.2f on %s — closing early", adx_now, symbol)
             qty_now = float(pos["size"])
             trade.close_trade(symbol, side, qty_now)
             pnl = _estimate_pnl(side, entry, current_price, qty_now)
             risk.update_pnl(pnl)
             risk.record_trade_closed()
             try:
+                open_time = _trade_open_times.get(symbol)
                 duration_mins = (
-                    (datetime.now(timezone.utc) - _trade_open_time).total_seconds() / 60
-                    if _trade_open_time else 0
+                    (datetime.now(timezone.utc) - open_time).total_seconds() / 60
+                    if open_time else 0
                 )
                 s = risk.get_stats()
                 try:
@@ -162,54 +200,62 @@ def manage() -> bool:
                     balance=bal, dd_left=s["trailing_dd_left"],
                     close_reason="ADX fade",
                 )
+                _append_trade_log(
+                    symbol=symbol, side=side,
+                    strategy=trade_info.get("strategy", "WR"),
+                    entry_type=trade_info.get("entry_type", "market"),
+                    entry=entry, exit_price=current_price,
+                    pnl=pnl, duration_mins=duration_mins,
+                    close_reason="ADX fade",
+                )
             except Exception as exc:
                 logger.warning("Telegram notify_trade_closed failed: %s", exc)
-            clear_trade()
+            clear_trade(symbol)
             return False
 
     except Exception as exc:
-        logger.error("position_manager.manage error on %s: %s", symbol, exc)
+        logger.error("position_manager._manage_one error on %s: %s", symbol, exc)
 
     return True
 
 
 def init_from_exchange():
     """
-    Sync internal state with any positions open on the exchange.
-    Call once on startup so a restart doesn't re-open a duplicate trade.
+    Sync internal state with ALL positions open on the exchange.
+    Call once on startup so a restart doesn't re-open duplicate trades.
     """
-    global _current_trade, _breakeven_moved, _trade_open_time
+    global _trades, _breakeven_moved, _trade_open_times
     positions = exchange.get_open_positions()
-    if positions:
-        pos = positions[0]
-        _current_trade = {
-            "symbol": pos["symbol"],
+    now = datetime.now(timezone.utc)
+    for pos in positions:
+        sym = pos["symbol"]
+        t = {
+            "symbol": sym,
             "side":   pos["side"],
             "qty":    float(pos["size"]),
             "entry":  float(pos["avgPrice"]),
             "sl":     float(pos.get("stopLoss")  or 0),
             "tp":     float(pos.get("takeProfit") or 0),
         }
-        _breakeven_moved = False
-        _trade_open_time = datetime.now(timezone.utc)   # conservative — assume just opened
+        _trades.append(t)
+        _trade_open_times[sym] = now   # conservative
         logger.info(
             "Resumed open position: %s %s  qty=%s  entry=%s",
-            _current_trade["symbol"], _current_trade["side"],
-            _current_trade["qty"],   _current_trade["entry"],
+            sym, t["side"], t["qty"], t["entry"],
         )
-    else:
+    if not positions:
         logger.info("No existing positions found on startup.")
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
 
-def _on_position_closed():
+def _on_position_closed(trade_info: dict):
     """Handle a trade closed by SL, TP, or manual action on the exchange."""
-    symbol    = _current_trade["symbol"]
-    side      = _current_trade["side"]
-    entry     = float(_current_trade["entry"])
-    qty       = float(_current_trade["qty"])
-    open_time = _trade_open_time
+    symbol    = trade_info["symbol"]
+    side      = trade_info["side"]
+    entry     = float(trade_info["entry"])
+    qty       = float(trade_info["qty"])
+    open_time = _trade_open_times.get(symbol)
     logger.info("Position closed (SL/TP/manual): %s", symbol)
     pnl = exchange.get_closed_pnl_for_symbol(symbol)
     if pnl != 0:
@@ -238,11 +284,56 @@ def _on_position_closed():
             balance=bal, dd_left=s["trailing_dd_left"],
             close_reason="SL/TP",
         )
+        _append_trade_log(
+            symbol=symbol, side=side,
+            strategy=trade_info.get("strategy", "WR"),
+            entry_type=trade_info.get("entry_type", "market"),
+            entry=entry, exit_price=exit_price,
+            pnl=pnl, duration_mins=duration_mins,
+            close_reason="SL/TP",
+        )
     except Exception as exc:
         logger.warning("Telegram notify_trade_closed failed: %s", exc)
-    clear_trade()
+    clear_trade(symbol)
 
 
 def _estimate_pnl(side: str, entry: float, price: float, qty: float) -> float:
     """Rough unrealized PnL for early exits (before exchange confirms)."""
     return (price - entry) * qty if side == "Buy" else (entry - price) * qty
+
+
+_TRADE_LOG_PATH = "trade_log.csv"
+_TRADE_LOG_FIELDS = [
+    "datetime", "symbol", "side", "strategy", "entry_type",
+    "entry", "exit", "pnl", "duration_mins", "close_reason", "version",
+]
+
+
+def _append_trade_log(
+    symbol: str, side: str, strategy: str, entry_type: str,
+    entry: float, exit_price: float, pnl: float,
+    duration_mins: float, close_reason: str,
+):
+    """Append one row to the persistent trade log CSV."""
+    row = {
+        "datetime":     datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "symbol":       symbol,
+        "side":         side,
+        "strategy":     strategy,
+        "entry_type":   entry_type,
+        "entry":        round(entry, 6),
+        "exit":         round(exit_price, 6),
+        "pnl":          round(pnl, 4),
+        "duration_mins": round(duration_mins, 1),
+        "close_reason": close_reason,
+        "version":      getattr(config, "BOT_VERSION", "?"),
+    }
+    file_exists = os.path.isfile(_TRADE_LOG_PATH)
+    try:
+        with open(_TRADE_LOG_PATH, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=_TRADE_LOG_FIELDS)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
+    except Exception as exc:
+        logger.warning("trade_log write failed: %s", exc)

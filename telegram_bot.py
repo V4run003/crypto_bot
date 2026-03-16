@@ -120,10 +120,29 @@ def notify_bot_stopped(reason: str):
     )
 
 
+def notify_window_opened():
+    send(
+        f"🟡 <b>TRADING WINDOW OPEN</b>  —  {_ts()}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"Active until {config.TIME_FILTER_END:02d}:00 UTC\n"
+    )
+
+
+def notify_window_closed():
+    send(
+        f"🔵 <b>TRADING WINDOW CLOSED</b>  —  {_ts()}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"Next open: {config.TIME_FILTER_START:02d}:00 UTC\n"
+    )
+
+
 def notify_trade_opened(
     symbol: str, side: str, entry: float,
     sl: float, tp: float, qty: float,
     balance: float, trade_count: int,
+    strategy: str = "WR",
+    entry_type: str = "market",
+    wait_secs: float = 0.0,
 ):
     arrow     = "📈" if side == "Buy" else "📉"
     direction = "LONG" if side == "Buy" else "SHORT"
@@ -131,9 +150,16 @@ def notify_trade_opened(
     tp_dist   = abs(tp - entry)
     risk_usd  = sl_dist * qty
     reward    = tp_dist * qty
+    if entry_type == "limit":
+        entry_detail = f"limit (filled in {wait_secs:.0f}s)" if wait_secs > 0 else "limit"
+    elif wait_secs > 0:
+        entry_detail = f"market (waited {wait_secs:.0f}s)"
+    else:
+        entry_detail = "market"
     send(
         f"{arrow} <b>{direction} OPENED</b> — {symbol}  —  {_ts()}\n"
         f"━━━━━━━━━━━━━━━━━\n"
+        f"Strategy: <b>{strategy}</b>  |  Entry: {entry_detail}\n"
         f"Entry:   <b>${entry:,.4f}</b>\n"
         f"Stop:    ${sl:,.4f}  (risk   ${risk_usd:,.2f})\n"
         f"Target:  ${tp:,.4f}  (reward ${reward:,.2f})\n"
@@ -174,7 +200,7 @@ def notify_daily_report(
 ):
     wr          = (wins / trade_count * 100) if trade_count else 0
     pnl_flag    = "🟢" if daily_pnl >= 0 else "🔴"
-    total_target = config.ACCOUNT_SIZE * 0.10      # e.g. $500 for a $5k account
+    total_target = config.PROFIT_TARGET             # Phase 1 profit target (e.g. $800 for 10k 2-phase)
     earned       = max(0, total_target - profit_needed)
     progress     = min(100, earned / total_target * 100) if total_target else 0
     bars         = int(progress / 10)
@@ -202,6 +228,35 @@ def notify_risk_limit(reason: str):
         f"━━━━━━━━━━━━━━━━━\n"
         f"{reason}\n"
     )
+
+
+def notify_signal_drought(hours: float):
+    """Alert when no signal has fired for DROUGHT_ALERT_HOURS during the trading window."""
+    send(
+        f"🔇 <b>Signal Drought</b>  —  {_ts()}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"No signals for <b>{hours:.1f}h</b> during the active trading window.\n"
+        f"Check: parabolic bull (WR never hits -80), regime change, or API issue.\n"
+    )
+
+
+def notify_regime_change(regime: str):
+    """Alert when BTC 4H price crosses the EMA200 (bull/bear flip)."""
+    if regime == "bear":
+        send(
+            f"⚠️ <b>BTC 4H Regime: BEAR</b>  —  {_ts()}\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"Price crossed <b>below</b> the 4H EMA200.\n"
+            f"Expect fewer signals and lower WR until regime recovers.\n"
+            f"Bot continues running normally.\n"
+        )
+    else:
+        send(
+            f"✅ <b>BTC 4H Regime: BULL</b>  —  {_ts()}\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"Price crossed <b>above</b> the 4H EMA200.\n"
+            f"Normal signal frequency expected to resume.\n"
+        )
 
 
 def notify_error(title: str, detail: str):

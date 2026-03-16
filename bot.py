@@ -12,11 +12,14 @@ log_module.setup()   # configure formatters before any other module logs
 import config
 import exchange
 import risk
+import strategy
 import position_manager
 import scanner
 import telegram_bot
 
 _logger = logging.getLogger("bot")
+
+_btc_4h_regime = None   # last known BTC 4H regime — used to detect crossovers
 
 
 def sync_clock():
@@ -93,7 +96,7 @@ def main():
     risk.update_peak_balance()   # establish baseline peak for trailing DD guard
 
     s = risk.get_stats()
-    target_balance = config.ACCOUNT_SIZE * 1.10
+    target_balance = config.ACCOUNT_SIZE + config.PROFIT_TARGET
     profit_needed  = max(0.0, target_balance - balance)
     telegram_bot.notify_bot_started(
         balance=balance, peak=s["peak_balance"],
@@ -107,7 +110,12 @@ def main():
         config.TRADE_COOLDOWN_SECS // 60,
     )
 
+    # Track UTC date so we can fire the daily report at midnight rollover.
     _last_report_day = datetime.now(timezone.utc).date()
+
+    # ── Signal drought tracking ───────────────────────────────────────────────
+    _last_signal_time  = None   # set whenever a trade is opened
+    _drought_alerted   = False  # reset when a new trade fires
 
     while True:
         wait = seconds_to_next_candle()
@@ -121,20 +129,37 @@ def main():
             break
 
         try:
-            # ── Daily report at UTC midnight (before the day counter resets) ──
-            today = datetime.now(timezone.utc).date()
+            now_utc = datetime.now(timezone.utc)
+
+            # ── Midnight daily report ─────────────────────────────────────────
+            today = now_utc.date()
             if today != _last_report_day:
                 _send_daily_report(_last_report_day)
                 _last_report_day = today
 
-            utc_time = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+            utc_time = now_utc.strftime("%H:%M:%S UTC")
             s = risk.get_stats()
             _logger.info(
                 "─── [%s]  trades=%d/%d  daily_pnl=$%.2f  trailing_dd_left=$%.2f  cooldown=%.0fs ───",
                 utc_time, s["trade_count"], config.MAX_TRADES_PER_DAY,
                 s["daily_loss"], s["trailing_dd_left"], s["cooldown_secs"],
             )
-            scanner.scan()
+            trade_opened = scanner.scan()
+            if trade_opened:
+                _last_signal_time = now_utc
+                _drought_alerted  = False
+            _check_btc_4h_regime()
+
+            # ── Signal drought alert ──────────────────────────────────────────
+            drought_hours = getattr(config, "DROUGHT_ALERT_HOURS", 6)
+            if drought_hours > 0:
+                hour_utc = now_utc.hour
+                in_window = config.TIME_FILTER_START <= hour_utc < config.TIME_FILTER_END
+                if in_window and _last_signal_time is not None and not _drought_alerted:
+                    silent_h = (now_utc - _last_signal_time).total_seconds() / 3600
+                    if silent_h >= drought_hours:
+                        telegram_bot.notify_signal_drought(silent_h)
+                        _drought_alerted = True
 
         except KeyboardInterrupt:
             _logger.info("Bot stopped by user.")
@@ -147,6 +172,24 @@ def main():
             telegram_bot.notify_error("Unhandled Bot Error", detail)
 
 
+def _check_btc_4h_regime():
+    """Fetch BTC 4H candles and send a Telegram alert if the regime has flipped."""
+    global _btc_4h_regime
+    if not getattr(config, "REGIME_ALERT_ENABLED", False):
+        return
+    try:
+        candles_4h = exchange.get_candles_4h("BTCUSDT")
+        regime = strategy.get_btc_4h_regime(candles_4h)
+        if regime is None:
+            return
+        if _btc_4h_regime is not None and regime != _btc_4h_regime:
+            telegram_bot.notify_regime_change(regime)
+            _logger.info("BTC 4H regime changed: %s → %s", _btc_4h_regime, regime)
+        _btc_4h_regime = regime
+    except Exception as exc:
+        _logger.warning("BTC 4H regime check failed: %s", exc)
+
+
 def _send_daily_report(report_day):
     """Send Telegram daily summary for `report_day` (a datetime.date)."""
     try:
@@ -156,7 +199,7 @@ def _send_daily_report(report_day):
         except Exception:
             balance = 0.0
         date_str       = report_day.strftime("%a %d %b %Y")
-        target_balance = config.ACCOUNT_SIZE * 1.10
+        target_balance = config.ACCOUNT_SIZE + config.PROFIT_TARGET
         profit_needed  = max(0.0, target_balance - balance)
         telegram_bot.notify_daily_report(
             date_str=date_str,
