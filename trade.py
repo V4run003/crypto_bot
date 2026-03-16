@@ -36,7 +36,7 @@ def calculate_qty(symbol, entry, sl, balance):
     return exchange.round_qty(symbol, raw_qty)
 
 
-def open_long(symbol, entry, sl, tp):
+def open_long(symbol, entry, sl, tp, use_limit: bool = False):
     """Set leverage, size the position safely, then place a Buy order."""
     exchange.set_leverage(symbol, config.MAX_LEVERAGE)
     balance = exchange.get_wallet_balance()
@@ -46,10 +46,11 @@ def open_long(symbol, entry, sl, tp):
     if qty is None:
         logger.warning("%s: calculated qty below exchange minimum — skipping long", symbol)
         return None
-    offset  = getattr(config, "LIMIT_ENTRY_OFFSET_PCT", 0.0)
-    limit_p = entry * (1 - offset)
     entry_r = exchange.round_price(symbol, entry)
-    limit_r = exchange.round_price(symbol, limit_p)
+    limit_r = None
+    if use_limit:
+        offset  = getattr(config, "LIMIT_ENTRY_OFFSET_PCT", 0.0)
+        limit_r = exchange.round_price(symbol, entry * (1 - offset))
     order_info = exchange.place_order(symbol, "Buy", qty, sl=sl_r, tp=tp_r, limit_price=limit_r)
     entry_type = order_info.get("entry_type", "market")
     wait_secs  = order_info.get("wait_secs", 0.0)
@@ -62,7 +63,7 @@ def open_long(symbol, entry, sl, tp):
             "entry_type": entry_type, "wait_secs": wait_secs}
 
 
-def open_short(symbol, entry, sl, tp):
+def open_short(symbol, entry, sl, tp, use_limit: bool = False):
     """Set leverage, size the position safely, then place a Sell order."""
     exchange.set_leverage(symbol, config.MAX_LEVERAGE)
     balance = exchange.get_wallet_balance()
@@ -72,10 +73,11 @@ def open_short(symbol, entry, sl, tp):
     if qty is None:
         logger.warning("%s: calculated qty below exchange minimum — skipping short", symbol)
         return None
-    offset  = getattr(config, "LIMIT_ENTRY_OFFSET_PCT", 0.0)
-    limit_p = entry * (1 + offset)
     entry_r = exchange.round_price(symbol, entry)
-    limit_r = exchange.round_price(symbol, limit_p)
+    limit_r = None
+    if use_limit:
+        offset  = getattr(config, "LIMIT_ENTRY_OFFSET_PCT", 0.0)
+        limit_r = exchange.round_price(symbol, entry * (1 + offset))
     order_info = exchange.place_order(symbol, "Sell", qty, sl=sl_r, tp=tp_r, limit_price=limit_r)
     entry_type = order_info.get("entry_type", "market")
     wait_secs  = order_info.get("wait_secs", 0.0)

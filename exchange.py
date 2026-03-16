@@ -219,14 +219,14 @@ def set_leverage(symbol, leverage):
 
 def place_order(symbol, side, qty, sl=None, tp=None, limit_price=None):
     """
-    Place an entry order.  If USE_LIMIT_ENTRY is True and limit_price is given,
-    tries a post-only limit first (maker fee 0.02%).  If the limit is rejected
-    or not filled within LIMIT_ORDER_TIMEOUT_SECS, cancels it and falls back to
-    a market order (taker fee 0.06%).
+    Place an entry order.  If limit_price is given, tries a post-only limit
+    first (maker fee 0.02%).  If the limit is rejected or not filled within
+    LIMIT_ORDER_TIMEOUT_SECS, cancels it and falls back to a market order
+    (taker fee 0.06%).  Pass limit_price=None to always use market.
 
     Returns dict: {"entry_type": "limit"|"market", "wait_secs": float}
     """
-    if config.USE_LIMIT_ENTRY and limit_price is not None:
+    if limit_price is not None:
         result = _try_limit_order(symbol, side, qty, limit_price, sl, tp)
         if result["filled"]:
             return {"entry_type": "limit", "wait_secs": result["wait_secs"]}

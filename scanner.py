@@ -119,7 +119,8 @@ def scan():
 
             if sig == "long":
                 logger.info("Bullish signal detected on %s", symbol)
-                info = trade.open_long(symbol, entry, sl, tp)
+                use_limit = (strategy_name == "RSI")
+                info = trade.open_long(symbol, entry, sl, tp, use_limit=use_limit)
                 if info:
                     risk.record_trade()
                     position_manager.set_trade(
@@ -130,7 +131,8 @@ def scan():
 
             elif sig == "short":
                 logger.info("Bearish signal detected on %s", symbol)
-                info = trade.open_short(symbol, entry, sl, tp)
+                use_limit = (strategy_name == "RSI")
+                info = trade.open_short(symbol, entry, sl, tp, use_limit=use_limit)
                 if info:
                     risk.record_trade()
                     position_manager.set_trade(
