@@ -60,8 +60,11 @@ Both signal types share the same filters, SL/TP logic, and risk rules. The only 
 
 ### Order execution
 
-- `USE_LIMIT_ENTRY = True` — post-only limit order attempted first (maker fee 0.02%)
-- If limit not filled within `LIMIT_ORDER_TIMEOUT_SECS` (30s), cancelled and market order sent (taker fee 0.06%)
+- **RSI entries** use a post-only limit order (maker fee 0.02%) — price is moving toward the level, so a resting limit fills reliably
+- **WR entries** use market orders — PostOnly is rejected instantly on a momentum hook
+- Limit vs market is controlled per-strategy in `scanner.py` (`use_limit=True/False`); `USE_LIMIT_ENTRY` in config is a legacy flag and is no longer checked
+- If a limit is not filled within `LIMIT_ORDER_TIMEOUT_SECS` (60s), it is cancelled and a market order is sent as fallback
+- Post-cancel: if `cancel_order` itself fails (order filled at the exact timeout moment), the order status is re-checked before falling back to avoid a duplicate position
 - `entry_type` (limit/market) and `wait_secs` recorded in trade log and Telegram message
 
 ---
@@ -129,7 +132,7 @@ All testing on 180 days unless noted. BTC unless stated.
 | Rule | Setting | Why |
 |---|---|---|
 | Risk per trade | $50 (0.5%) | Scales with $10k |
-| Max daily loss (bot) | $200 | $300 inside the $500 prop-firm daily limit |
+| Max daily loss (bot) | $150 | $350 inside the $500 prop-firm daily limit |
 | Max overall loss | 10% = $1,000 | Fixed floor at $9,000 — not trailing |
 | DD buffer | $100 | Pause $100 before the floor |
 | Phase 1 target | $800 (8%) | Reach $10,800 |
@@ -158,11 +161,14 @@ python show_trades.py all    # full history
 
 ### BOT_VERSION
 
-`BOT_VERSION` in `config.py` (currently `"3.1.0"`) is written into every trade log row. Bump it when making meaningful strategy or logic changes to track which version produced which trades.
+`BOT_VERSION` in `config.py` (currently `"3.3.4"`) is written into every trade log row. Bump it when making meaningful strategy or logic changes to track which version produced which trades.
 
 Version history:
 - `3.0.0` — V3 portfolio (4H EMA200 filter, PAXG long-only, rate-limit hardening)
 - `3.1.0` — 10k 2-phase rules (fixed DD, $50 risk, BOT_VERSION, trade log, Telegram entry_type/strategy)
+- `3.2.x` — Candle cache system, SMA backtest validation, portfolio expansion to 8 coins
+- `3.3.x` — Multi-slot architecture, signal drought + regime change alerts, PAXG long-only, RSI zone widening
+- `3.3.4` — Bug fixes: PnL=$0 retry (Bybit API lag), double-position cancel race, `sync_clock()` Linux crash, `init_from_exchange()` BE trigger on restart, daily trade count + cooldown not restored on restart
 
 ---
 
@@ -256,6 +262,11 @@ Key: `{SYMBOL}_{interval}_{days}d.parquet`. Files older than `CACHE_MAX_AGE_DAYS
 | Mar 2026 | Trade log (trade_log.csv) added | Persistent history across restarts |
 | Mar 2026 | Moved to 10k 2-phase account | Scale up; fixed DD (no trailing) |
 | Mar 2026 | SMA portfolio integration rejected | MaxDD $312 → $725 with SMA; BTC SMA PF 0.96; PIPPIN MaxDD $900; CFT floor $1,000 — too close |
+| Mar 2026 | Bug fix: PnL=$0 on TP wins | Bybit API settlement lag — added 5-retry × 3s loop in `get_closed_pnl_for_symbol()` |
+| Mar 2026 | Bug fix: double position on limit cancel race | `cancel_order` fails if order fills at timeout → re-check status before market fallback |
+| Mar 2026 | Bug fix: `sync_clock()` crash on Linux VPS | `ctypes.windll` is Windows-only → added `platform.system()` guard |
+| Mar 2026 | Bug fix: false BE trigger on restart | `init_from_exchange()` stored `sl=0.0` when Bybit returns `""` → stored as `None`; BE check guarded |
+| Mar 2026 | Bug fix: trade count + cooldown lost on restart | `_trade_count` and `_last_close_time` reset to 0 on every restart → now restored from Bybit `get_closed_pnl` history |
 
 ---
 

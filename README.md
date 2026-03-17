@@ -34,7 +34,7 @@ Shorts are disabled on PAXGUSDT (`WR_LONG_ONLY_COINS`). Gold-backed asset with s
 | Parameter | Value | Notes |
 |---|---|---|
 | Risk per trade | $50 (0.5%) | Scales with $10k account |
-| Max daily loss (bot) | $200 | $300 inside the prop-firm's $500/day limit |
+| Max daily loss (bot) | $150 | $350 inside the prop-firm's $500/day limit |
 | Max overall loss | $1,000 (10%) | Fixed floor at $9,000 — **not trailing** |
 | DD buffer | $100 | Bot pauses $100 before the $9,000 floor |
 | Phase 1 profit target | $800 (8%) | Reach $10,800 to pass Phase 1 |
@@ -49,14 +49,13 @@ Shorts are disabled on PAXGUSDT (`WR_LONG_ONLY_COINS`). Gold-backed asset with s
 bot.py               — Main loop: NTP sync, candle timing, window alerts, daily report
 config.py            — All settings (gitignored — copy from config.example.py)
 config.example.py    — Safe template to commit; fill in secrets locally
-exchange.py          — Bybit API wrapper (pybit V5): orders, positions, PnL
+exchange.py          — Bybit V5 API: orders, positions, PnL, candles, balances
 strategy.py          — WR Exhaustion signal (EMA, ADX, ATR, 4H filter, HTF)
 strategy_rsi.py      — RSI Pullback signal (same shared filters)
 scanner.py           — Symbol loop, hybrid signal orchestration
 risk.py              — Daily loss, fixed DD floor, trade gate
 position_manager.py  — Trade lifecycle, trade log (trade_log.csv)
 trade.py             — Order placement (limit with market fallback)
-exchange.py          — Bybit V5 API: orders, candles, balances
 telegram_bot.py      — Background Telegram notification sender
 logger.py            — Logging setup
 data_cache.py        — Parquet candle cache (avoid API rate limits on backtests)
