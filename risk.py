@@ -136,21 +136,25 @@ def update_pnl(pnl: float):
     logger.info("PnL update: $%+.2f  |  daily total: $%.2f", pnl, _daily_loss)
 
 
-def restore_daily_state(pnl: float, trade_count: int, last_close_time=None):
+def restore_daily_state(pnl: float, trade_count: int, wins: int = 0, losses: int = 0,
+                        last_close_time=None):
     """Restore daily counters from exchange history after a bot restart.
 
-    Directly sets _daily_loss and _trade_count without skewing the per-trade
-    win/loss counters (those are cosmetic — used only for daily report).
-    Also restores the cooldown timer if a last_close_time is provided.
+    Restores _daily_loss, _trade_count, _daily_wins, _daily_losses, and the
+    cooldown timer.  Sets _reset_day to today so reset_if_new_day() does not
+    immediately wipe the restored values on the first scan cycle.
     """
-    global _daily_loss, _trade_count, _last_close_time
-    _daily_loss  = pnl
-    _trade_count = trade_count
+    global _daily_loss, _trade_count, _daily_wins, _daily_losses, _last_close_time, _reset_day
+    _daily_loss   = pnl
+    _trade_count  = trade_count
+    _daily_wins   = wins
+    _daily_losses = losses
+    _reset_day    = datetime.now(timezone.utc).date()   # ← prevents first-cycle wipe
     if last_close_time is not None:
         _last_close_time = last_close_time
     logger.info(
-        "Daily state restored: pnl=$%.2f  trades=%d  last_close=%s",
-        pnl, trade_count,
+        "Daily state restored: pnl=$%.2f  trades=%d (%dW/%dL)  last_close=%s",
+        pnl, trade_count, wins, losses,
         last_close_time.strftime("%H:%M UTC") if last_close_time else "none",
     )
 

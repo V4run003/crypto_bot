@@ -142,6 +142,7 @@ All testing on 180 days unless noted. BTC unless stated.
 | Min duration | 60 s | Prop-firm compliance |
 | Max leverage | 5× | Set per-symbol via API |
 | `TRAILING_DD` | `False` | 2-phase has no trailing DD — fixed floor |
+| Unrealized loss cap | 2 × $50 = $100 | Force-close if SL gaps; `MAX_UNREALIZED_LOSS` in config |
 
 ---
 
@@ -168,7 +169,7 @@ Version history:
 - `3.1.0` — 10k 2-phase rules (fixed DD, $50 risk, BOT_VERSION, trade log, Telegram entry_type/strategy)
 - `3.2.x` — Candle cache system, SMA backtest validation, portfolio expansion to 8 coins
 - `3.3.x` — Multi-slot architecture, signal drought + regime change alerts, PAXG long-only, RSI zone widening
-- `3.3.4` — Bug fixes: PnL=$0 retry (Bybit API lag), double-position cancel race, `sync_clock()` Linux crash, `init_from_exchange()` BE trigger on restart, daily trade count + cooldown not restored on restart
+- `3.3.4` — Bug fixes: PnL=$0 retry (Bybit API lag), double-position cancel race, `sync_clock()` Linux crash, `init_from_exchange()` BE trigger on restart, daily trade count + cooldown not restored on restart, restore immediately wiped by `reset_if_new_day()`, open position not counted in trade cap after restart; unrealized loss cap added (`MAX_UNREALIZED_LOSS`)
 
 ---
 
@@ -267,6 +268,9 @@ Key: `{SYMBOL}_{interval}_{days}d.parquet`. Files older than `CACHE_MAX_AGE_DAYS
 | Mar 2026 | Bug fix: `sync_clock()` crash on Linux VPS | `ctypes.windll` is Windows-only → added `platform.system()` guard |
 | Mar 2026 | Bug fix: false BE trigger on restart | `init_from_exchange()` stored `sl=0.0` when Bybit returns `""` → stored as `None`; BE check guarded |
 | Mar 2026 | Bug fix: trade count + cooldown lost on restart | `_trade_count` and `_last_close_time` reset to 0 on every restart → now restored from Bybit `get_closed_pnl` history |
+| Mar 2026 | Bug fix: restore_daily_state wiped on first cycle | `_reset_day` was None after restore → `reset_if_new_day()` immediately zeroed counts → fixed by setting `_reset_day` inside `restore_daily_state()` |
+| Mar 2026 | Bug fix: open position not counted in trade cap after restart | `init_from_exchange()` resumed the open slot but didn't call `record_trade()` → daily cap was 1 trade short → fixed |
+| Mar 2026 | Unrealized loss cap added | `MAX_UNREALIZED_LOSS = RISK_PER_TRADE × 2` ($100) — force-closes if unrealized loss exceeds cap, guarding against SL gap/slippage |
 
 ---
 

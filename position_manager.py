@@ -156,6 +156,54 @@ def _manage_one(trade_info: dict) -> bool:
     entry  = trade_info["entry"]
     tp     = trade_info.get("original_tp") or trade_info.get("tp")
 
+    # ── Unrealized loss cap — catches SL gap / slippage scenarios ────────────
+    # Bybit returns unrealisedPnl in the position dict (no extra API call).
+    # If price gaps through the SL, this closes the trade before the loss
+    # grows beyond 2× the planned risk.
+    unrealized_pnl = float(pos.get("unrealisedPnl", 0))
+    max_loss = getattr(config, "MAX_UNREALIZED_LOSS", config.RISK_PER_TRADE * 2)
+    if unrealized_pnl < -max_loss:
+        qty_now = float(pos["size"])
+        logger.warning(
+            "%s: unrealized loss $%.2f exceeds cap $%.2f — force-closing",
+            symbol, unrealized_pnl, max_loss,
+        )
+        trade.close_trade(symbol, side, qty_now)
+        pnl_est = _estimate_pnl(side, entry, float(pos.get("markPrice", entry)), qty_now)
+        risk.update_pnl(pnl_est)
+        risk.record_trade_closed()
+        try:
+            open_time = _trade_open_times.get(symbol)
+            duration_mins = (
+                (datetime.now(timezone.utc) - open_time).total_seconds() / 60
+                if open_time else 0
+            )
+            s = risk.get_stats()
+            try:
+                bal = exchange.get_wallet_balance()
+            except Exception:
+                bal = 0.0
+            telegram_bot.notify_trade_closed(
+                symbol=symbol, side=side, entry=entry,
+                exit_price=float(pos.get("markPrice", entry)),
+                pnl=pnl_est, duration_mins=duration_mins,
+                daily_pnl=s["daily_loss"], balance=bal,
+                dd_left=s["trailing_dd_left"],
+                close_reason="loss cap",
+            )
+            _append_trade_log(
+                symbol=symbol, side=side,
+                strategy=trade_info.get("strategy", "WR"),
+                entry_type=trade_info.get("entry_type", "market"),
+                entry=entry, exit_price=float(pos.get("markPrice", entry)),
+                pnl=pnl_est, duration_mins=duration_mins,
+                close_reason="loss cap",
+            )
+        except Exception as exc:
+            logger.warning("Telegram notify after loss-cap close failed: %s", exc)
+        clear_trade(symbol)
+        return False
+
     try:
         candles_5m    = exchange.get_candles(symbol)
         current_price = float(candles_5m[0][4])
@@ -241,6 +289,7 @@ def init_from_exchange():
         }
         _trades.append(t)
         _trade_open_times[sym] = now   # conservative
+        risk.record_trade()   # count this slot so daily trade cap is accurate after restart
         logger.info(
             "Resumed open position: %s %s  qty=%s  entry=%s",
             sym, t["side"], t["qty"], t["entry"],

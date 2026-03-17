@@ -99,8 +99,8 @@ def main():
         return
 
     # Restore today's PnL, trade count and cooldown so all daily limits survive restarts
-    today_pnl, today_count, last_close_time = exchange.get_today_trade_stats()
-    risk.restore_daily_state(today_pnl, today_count, last_close_time)
+    today_pnl, today_count, today_wins, today_losses, last_close_time = exchange.get_today_trade_stats()
+    risk.restore_daily_state(today_pnl, today_count, today_wins, today_losses, last_close_time)
 
     # Sync with any positions open before this restart
     position_manager.init_from_exchange()
@@ -125,7 +125,7 @@ def main():
     _last_report_day = datetime.now(timezone.utc).date()
 
     # ── Signal drought tracking ───────────────────────────────────────────────
-    _last_signal_time  = None   # set whenever a trade is opened
+    _last_signal_time  = datetime.now(timezone.utc)  # clock starts from bot launch
     _drought_alerted   = False  # reset when a new trade fires
 
     while True:
@@ -164,9 +164,12 @@ def main():
             # ── Signal drought alert ──────────────────────────────────────────
             drought_hours = getattr(config, "DROUGHT_ALERT_HOURS", 6)
             if drought_hours > 0:
-                hour_utc = now_utc.hour
-                in_window = config.TIME_FILTER_START <= hour_utc < config.TIME_FILTER_END
-                if in_window and _last_signal_time is not None and not _drought_alerted:
+                hour_utc    = now_utc.hour
+                in_window   = config.TIME_FILTER_START <= hour_utc < config.TIME_FILTER_END
+                # 24/7 coins (TIME_FILTER_EXCLUDED) are always in their active window
+                excl_24h    = set(getattr(config, "TIME_FILTER_EXCLUDED", []))
+                trading_24h = bool(excl_24h & set(config.APPROVED_COINS))
+                if (in_window or trading_24h) and not _drought_alerted:
                     silent_h = (now_utc - _last_signal_time).total_seconds() / 3600
                     if silent_h >= drought_hours:
                         telegram_bot.notify_signal_drought(silent_h)

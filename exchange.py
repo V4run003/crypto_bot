@@ -182,14 +182,16 @@ def get_today_trade_stats():
         records = resp["result"]["list"]
         pnl     = sum(float(e["closedPnl"]) for e in records)
         count   = len(records)
+        wins    = sum(1 for e in records if float(e["closedPnl"]) > 0)
+        losses  = sum(1 for e in records if float(e["closedPnl"]) < 0)
         last_close = (
             datetime.fromtimestamp(int(records[0]["updatedTime"]) / 1000, tz=timezone.utc)
             if records else None
         )
-        return pnl, count, last_close
+        return pnl, count, wins, losses, last_close
     except Exception as exc:
         logger.error("get_today_trade_stats failed: %s", exc)
-        return 0.0, 0, None
+        return 0.0, 0, 0, 0, None
 
 
 def get_closed_pnl_for_symbol(symbol, retries=5, delay=3):
@@ -214,8 +216,8 @@ def get_closed_pnl_for_symbol(symbol, retries=5, delay=3):
         except Exception as exc:
             logger.error("get_closed_pnl_for_symbol %s attempt %d failed: %s",
                          symbol, attempt + 1, exc)
-            return 0.0
-        # Record not yet available — wait and retry
+            # Fall through to sleep + retry (do not return immediately on transient errors)
+        # Record not yet available (or API error) — wait and retry
         if attempt < retries - 1:
             logger.info("get_closed_pnl_for_symbol %s: no record yet, retrying in %ds "
                         "(attempt %d/%d)", symbol, delay, attempt + 1, retries)

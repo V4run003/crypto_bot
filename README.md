@@ -37,6 +37,7 @@ Shorts are disabled on PAXGUSDT (`WR_LONG_ONLY_COINS`). Gold-backed asset with s
 | Max daily loss (bot) | $150 | $350 inside the prop-firm's $500/day limit |
 | Max overall loss | $1,000 (10%) | Fixed floor at $9,000 — **not trailing** |
 | DD buffer | $100 | Bot pauses $100 before the $9,000 floor |
+| Unrealized loss cap | $100 (2× risk) | Force-close on SL gap/slippage |
 | Phase 1 profit target | $800 (8%) | Reach $10,800 to pass Phase 1 |
 | Max trades/day | 14 | Caps only 2.8% of trading days |
 | Trade cooldown | 10 min | Post-close cooldown |
