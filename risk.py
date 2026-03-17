@@ -136,6 +136,25 @@ def update_pnl(pnl: float):
     logger.info("PnL update: $%+.2f  |  daily total: $%.2f", pnl, _daily_loss)
 
 
+def restore_daily_state(pnl: float, trade_count: int, last_close_time=None):
+    """Restore daily counters from exchange history after a bot restart.
+
+    Directly sets _daily_loss and _trade_count without skewing the per-trade
+    win/loss counters (those are cosmetic — used only for daily report).
+    Also restores the cooldown timer if a last_close_time is provided.
+    """
+    global _daily_loss, _trade_count, _last_close_time
+    _daily_loss  = pnl
+    _trade_count = trade_count
+    if last_close_time is not None:
+        _last_close_time = last_close_time
+    logger.info(
+        "Daily state restored: pnl=$%.2f  trades=%d  last_close=%s",
+        pnl, trade_count,
+        last_close_time.strftime("%H:%M UTC") if last_close_time else "none",
+    )
+
+
 def get_stats() -> dict:
     return {
         "daily_loss":       _daily_loss,

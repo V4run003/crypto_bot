@@ -154,7 +154,7 @@ def _manage_one(trade_info: dict) -> bool:
 
     side   = trade_info["side"]
     entry  = trade_info["entry"]
-    tp     = trade_info.get("original_tp") or trade_info["tp"]
+    tp     = trade_info.get("original_tp") or trade_info.get("tp")
 
     try:
         candles_5m    = exchange.get_candles(symbol)
@@ -162,7 +162,7 @@ def _manage_one(trade_info: dict) -> bool:
         adx_now       = strategy.check_adx(candles_5m)
 
         # ── Breakeven at 50 % of TP distance ─────────────────────────────────
-        if config.BE_ENABLED and symbol not in _breakeven_moved:
+        if config.BE_ENABLED and symbol not in _breakeven_moved and tp:
             halfway = entry + (tp - entry) * 0.5
             triggered = (
                 (side == "Buy"  and current_price >= halfway) or
@@ -229,13 +229,15 @@ def init_from_exchange():
     now = datetime.now(timezone.utc)
     for pos in positions:
         sym = pos["symbol"]
+        raw_sl = pos.get("stopLoss")  or "0"
+        raw_tp = pos.get("takeProfit") or "0"
         t = {
             "symbol": sym,
             "side":   pos["side"],
             "qty":    float(pos["size"]),
             "entry":  float(pos["avgPrice"]),
-            "sl":     float(pos.get("stopLoss")  or 0),
-            "tp":     float(pos.get("takeProfit") or 0),
+            "sl":     float(raw_sl) if float(raw_sl) > 0 else None,
+            "tp":     float(raw_tp) if float(raw_tp) > 0 else None,
         }
         _trades.append(t)
         _trade_open_times[sym] = now   # conservative

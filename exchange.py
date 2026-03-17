@@ -1,6 +1,7 @@
 import logging
 import math
 import ssl
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -163,8 +164,12 @@ def get_today_pnl():
         return 0.0
 
 
-def get_closed_pnl_for_symbol(symbol):
-    """Return the most recent closed PnL entry for a specific symbol today."""
+def get_today_trade_stats():
+    """Return (total_pnl, trade_count, last_close_time) for today's closed trades.
+
+    Used on restart to fully restore daily risk counters (PnL, trade count,
+    and cooldown timer) so limits survive bot restarts.
+    """
     try:
         day_start_ms = int(
             datetime.now(timezone.utc)
@@ -172,13 +177,51 @@ def get_closed_pnl_for_symbol(symbol):
             .timestamp() * 1000
         )
         resp    = session.get_closed_pnl(
-            category="linear", symbol=symbol, startTime=day_start_ms, limit=5
+            category="linear", startTime=day_start_ms, limit=50
         )
         records = resp["result"]["list"]
-        if records:
-            return float(records[0]["closedPnl"])
+        pnl     = sum(float(e["closedPnl"]) for e in records)
+        count   = len(records)
+        last_close = (
+            datetime.fromtimestamp(int(records[0]["updatedTime"]) / 1000, tz=timezone.utc)
+            if records else None
+        )
+        return pnl, count, last_close
     except Exception as exc:
-        logger.error("get_closed_pnl_for_symbol %s failed: %s", symbol, exc)
+        logger.error("get_today_trade_stats failed: %s", exc)
+        return 0.0, 0, None
+
+
+def get_closed_pnl_for_symbol(symbol, retries=5, delay=3):
+    """Return the most recent closed PnL entry for a specific symbol today.
+
+    Retries up to `retries` times with `delay` seconds between attempts to
+    allow for Bybit's API lag between a TP/SL fill and the record appearing.
+    """
+    day_start_ms = int(
+        datetime.now(timezone.utc)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .timestamp() * 1000
+    )
+    for attempt in range(retries):
+        try:
+            resp    = session.get_closed_pnl(
+                category="linear", symbol=symbol, startTime=day_start_ms, limit=5
+            )
+            records = resp["result"]["list"]
+            if records:
+                return float(records[0]["closedPnl"])
+        except Exception as exc:
+            logger.error("get_closed_pnl_for_symbol %s attempt %d failed: %s",
+                         symbol, attempt + 1, exc)
+            return 0.0
+        # Record not yet available — wait and retry
+        if attempt < retries - 1:
+            logger.info("get_closed_pnl_for_symbol %s: no record yet, retrying in %ds "
+                        "(attempt %d/%d)", symbol, delay, attempt + 1, retries)
+            time.sleep(delay)
+    logger.warning("get_closed_pnl_for_symbol %s: no record found after %d attempts",
+                   symbol, retries)
     return 0.0
 
 
@@ -262,7 +305,6 @@ def _try_limit_order(symbol, side, qty, price, sl, tp):
     Place a post-only limit order at `price`.  Poll until filled or timeout.
     Returns {"filled": bool, "wait_secs": float} always.
     """
-    import time
     start = time.monotonic()
     params = {
         "category":    "linear",
@@ -317,6 +359,18 @@ def _try_limit_order(symbol, side, qty, price, sl, tp):
         logger.info("%s: limit order cancelled (timeout %ds)", symbol, config.LIMIT_ORDER_TIMEOUT_SECS)
     except Exception as exc:
         logger.warning("%s: cancel_order failed: %s", symbol, exc)
+        # Cancel failed — the order may have filled at the exact timeout moment.
+        # Check status one final time to avoid placing a duplicate market order.
+        try:
+            history = session.get_order_history(
+                category="linear", symbol=symbol, orderId=order_id, limit=1
+            )
+            orders = history["result"]["list"]
+            if orders and orders[0]["orderStatus"] == "Filled":
+                logger.info("%s: limit order filled at timeout — skipping market fallback", symbol)
+                return {"filled": True, "wait_secs": time.monotonic() - start}
+        except Exception as poll_exc:
+            logger.warning("%s: post-cancel status check failed: %s", symbol, poll_exc)
     return {"filled": False, "wait_secs": wait}
 
 

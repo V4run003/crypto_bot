@@ -24,8 +24,9 @@ _btc_4h_regime = None   # last known BTC 4H regime — used to detect crossovers
 
 def sync_clock():
     """
-    Query pool.ntp.org and, if running with admin rights, correct the local
-    system clock. Either way, log the offset so issues are visible.
+    Query pool.ntp.org and log the offset so timing issues are visible.
+    On Windows with admin rights, syncs the system clock via w32tm.
+    On Linux (VPS), logs the offset only — use chrony/ntpd for sync.
     """
     try:
         c      = ntplib.NTPClient()
@@ -35,15 +36,27 @@ def sync_clock():
         if abs(offset) < 1:
             _logger.info("Clock is in sync — no correction needed.")
             return
-        if ctypes.windll.shell32.IsUserAnAdmin():
+        # Windows-only auto-correction
+        import platform
+        if platform.system() == "Windows":
             import subprocess
-            subprocess.run(["w32tm", "/resync", "/force"],
-                           capture_output=True, check=False)
-            _logger.info("System clock synced via w32tm.")
+            try:
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+            except Exception:
+                is_admin = False
+            if is_admin:
+                subprocess.run(["w32tm", "/resync", "/force"],
+                               capture_output=True, check=False)
+                _logger.info("System clock synced via w32tm.")
+            else:
+                _logger.warning(
+                    "Clock is %.1f s off. Run PowerShell as Admin: "
+                    "w32tm /resync /force", offset
+                )
         else:
             _logger.warning(
-                "Clock is %.1f s off. Run PowerShell as Admin: "
-                "w32tm /resync /force", offset
+                "Clock is %.1f s off. Ensure chrony or ntpd is running on the VPS.",
+                offset
             )
     except Exception as exc:
         _logger.warning("NTP sync skipped: %s", exc)
@@ -85,11 +98,9 @@ def main():
         telegram_bot.stop()
         return
 
-    # Restore today's realized PnL so daily limits survive restarts
-    today_pnl = exchange.get_today_pnl()
-    if today_pnl != 0:
-        risk.update_pnl(today_pnl)
-        _logger.info("Loaded today's realized PnL: $%.2f", today_pnl)
+    # Restore today's PnL, trade count and cooldown so all daily limits survive restarts
+    today_pnl, today_count, last_close_time = exchange.get_today_trade_stats()
+    risk.restore_daily_state(today_pnl, today_count, last_close_time)
 
     # Sync with any positions open before this restart
     position_manager.init_from_exchange()
