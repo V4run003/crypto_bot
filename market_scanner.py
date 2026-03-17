@@ -54,6 +54,11 @@ def _fetch_symbols() -> list:
         candidates.sort(key=lambda x: float(x.get("turnover24h", 0)), reverse=True)
         symbols = [t["symbol"] for t in candidates]
 
+        # Re-sort by APPROVED_COINS order so PF priority is preserved.
+        # Volume sort above only serves as a tie-breaker for coins not in the list.
+        approved_order = {sym: i for i, sym in enumerate(config.APPROVED_COINS)}
+        symbols.sort(key=lambda s: approved_order.get(s, 999))
+
         # If volume filter stripped everything, fall back to the full approved list
         if not symbols:
             symbols = list(config.APPROVED_COINS)

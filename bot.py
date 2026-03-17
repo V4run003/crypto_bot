@@ -127,6 +127,8 @@ def main():
     # ── Signal drought tracking ───────────────────────────────────────────────
     _last_signal_time  = datetime.now(timezone.utc)  # clock starts from bot launch
     _drought_alerted   = False  # reset when a new trade fires
+    _was_in_trade      = position_manager.is_position_open()  # track trade state for drought reset
+    _last_trade_update = datetime.now(timezone.utc)   # for periodic in-trade heartbeat
 
     while True:
         wait = seconds_to_next_candle()
@@ -157,8 +159,26 @@ def main():
             )
             trade_opened = scanner.scan()
             if trade_opened:
+                _last_signal_time  = now_utc
+                _last_trade_update = now_utc
+                _drought_alerted   = False
+                _was_in_trade      = True
+
+            # ── Reset drought when trade closes ───────────────────────────────
+            in_trade = position_manager.is_position_open()
+            if _was_in_trade and not in_trade:
+                # Position just closed — restart the drought clock cleanly
                 _last_signal_time = now_utc
                 _drought_alerted  = False
+            _was_in_trade = in_trade
+
+            # ── In-trade heartbeat (every 60 min) ─────────────────────────────
+            if in_trade:
+                mins_since_update = (now_utc - _last_trade_update).total_seconds() / 60
+                if mins_since_update >= 60:
+                    _send_trade_update()
+                    _last_trade_update = now_utc
+
             _check_btc_4h_regime()
 
             # ── Signal drought alert ──────────────────────────────────────────
@@ -169,7 +189,7 @@ def main():
                 # 24/7 coins (TIME_FILTER_EXCLUDED) are always in their active window
                 excl_24h    = set(getattr(config, "TIME_FILTER_EXCLUDED", []))
                 trading_24h = bool(excl_24h & set(config.APPROVED_COINS))
-                if (in_window or trading_24h) and not _drought_alerted:
+                if (in_window or trading_24h) and not _drought_alerted and not in_trade:
                     silent_h = (now_utc - _last_signal_time).total_seconds() / 3600
                     if silent_h >= drought_hours:
                         telegram_bot.notify_signal_drought(silent_h)
@@ -202,6 +222,39 @@ def _check_btc_4h_regime():
         _btc_4h_regime = regime
     except Exception as exc:
         _logger.warning("BTC 4H regime check failed: %s", exc)
+
+
+def _send_trade_update():
+    """Send a brief in-trade heartbeat so Telegram doesn't go completely silent."""
+    try:
+        trades = position_manager.get_open_trades()
+        if not trades:
+            return
+        s = risk.get_stats()
+        try:
+            balance = exchange.get_wallet_balance()
+        except Exception:
+            balance = 0.0
+        lines = []
+        for t in trades:
+            sym  = t["symbol"]
+            side = "LONG" if t["side"] == "Buy" else "SHORT"
+            try:
+                pos = exchange.get_position(sym)
+                upnl = float(pos.get("unrealisedPnl", 0)) if pos else 0.0
+            except Exception:
+                upnl = 0.0
+            lines.append(f"  {sym} {side}  uPnL: ${upnl:+,.2f}")
+        body = "\n".join(lines)
+        telegram_bot.send(
+            f"⏳ <b>In-Trade Update</b>  —  {telegram_bot._ts()}\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"{body}\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"Daily PnL: ${s['daily_loss']:+,.2f}  |  Balance: ${balance:,.2f}\n"
+        )
+    except Exception as exc:
+        _logger.warning("_send_trade_update failed: %s", exc)
 
 
 def _send_daily_report(report_day):
