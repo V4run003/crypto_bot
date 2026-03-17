@@ -168,7 +168,11 @@ def _manage_one(trade_info: dict) -> bool:
             "%s: unrealized loss $%.2f exceeds cap $%.2f — force-closing",
             symbol, unrealized_pnl, max_loss,
         )
-        trade.close_trade(symbol, side, qty_now)
+        try:
+            trade.close_trade(symbol, side, qty_now)
+        except Exception as exc:
+            logger.error("%s: loss-cap close_trade API call failed: %s — will retry next cycle", symbol, exc)
+            return True  # position still open; retry on the next scan cycle
         pnl_est = _estimate_pnl(side, entry, float(pos.get("markPrice", entry)), qty_now)
         risk.update_pnl(pnl_est)
         risk.record_trade_closed()
@@ -226,7 +230,11 @@ def _manage_one(trade_info: dict) -> bool:
                 and enforce_minimum_trade_time(symbol)):
             logger.info("ADX faded to %.2f on %s — closing early", adx_now, symbol)
             qty_now = float(pos["size"])
-            trade.close_trade(symbol, side, qty_now)
+            try:
+                trade.close_trade(symbol, side, qty_now)
+            except Exception as exc:
+                logger.error("%s: ADX-fade close_trade API call failed: %s — will retry next cycle", symbol, exc)
+                return True  # position still open; retry on the next scan cycle
             pnl = _estimate_pnl(side, entry, current_price, qty_now)
             risk.update_pnl(pnl)
             risk.record_trade_closed()
