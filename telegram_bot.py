@@ -176,8 +176,8 @@ def notify_trade_closed(
     balance: float, dd_left: float,
     close_reason: str = "SL/TP",
 ):
-    outcome   = "✅" if pnl >= 0 else "❌"
-    pnl_flag  = "🟢" if pnl >= 0 else "🔴"
+    outcome   = "✅" if pnl > 0 else "❌"
+    pnl_flag  = "🟢" if pnl > 0 else "🔴"
     direction = "LONG" if side == "Buy" else "SHORT"
     rr_achieved = abs(pnl) / config.RISK_PER_TRADE if config.RISK_PER_TRADE else 0
     send(

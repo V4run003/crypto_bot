@@ -27,8 +27,8 @@ def _print_table(rows):
         print("No trades to display.")
         return
 
-    wins   = sum(1 for r in rows if float(r["pnl"]) >= 0)
-    losses = len(rows) - wins
+    wins   = sum(1 for r in rows if float(r["pnl"]) > 0)
+    losses = sum(1 for r in rows if float(r["pnl"]) <= 0)
     total  = sum(float(r["pnl"]) for r in rows)
     wr     = wins / len(rows) * 100 if rows else 0
 
@@ -40,7 +40,7 @@ def _print_table(rows):
 
     for i, r in enumerate(rows, 1):
         pnl     = float(r["pnl"])
-        flag    = "✓" if pnl >= 0 else "✗"
+        flag    = "✓" if pnl > 0 else "✗"
         dur_m   = float(r["duration_mins"])
         dur_str = f"{dur_m:.0f}m" if dur_m < 120 else f"{dur_m/60:.1f}h"
         print(

@@ -222,8 +222,31 @@ def get_closed_pnl_for_symbol(symbol, retries=5, delay=3):
             logger.info("get_closed_pnl_for_symbol %s: no record yet, retrying in %ds "
                         "(attempt %d/%d)", symbol, delay, attempt + 1, retries)
             time.sleep(delay)
-    logger.warning("get_closed_pnl_for_symbol %s: no record found after %d attempts",
+    logger.warning("get_closed_pnl_for_symbol %s: no record found after %d attempts — trying executions fallback",
                    symbol, retries)
+
+    # Fallback: sum execPnl from execution records (get_closed_pnl can lag on demo/live).
+    # Use a 30-minute window so we only pick up the trade that just closed —
+    # NOT all of today's trades (which would double-count earlier same-symbol trades).
+    # closedSize > 0 = closing execution; execPnl = realised PnL for that fill.
+    try:
+        recent_start_ms = int((datetime.now(timezone.utc).timestamp() - 1800) * 1000)
+        resp  = session.get_executions(
+            category="linear", symbol=symbol, startTime=recent_start_ms, limit=20
+        )
+        execs = resp["result"]["list"]
+        pnl   = sum(
+            float(e.get("execPnl", 0))
+            for e in execs
+            if e.get("execType") == "Trade" and float(e.get("closedSize", 0)) > 0
+        )
+        if pnl != 0:
+            logger.info("get_closed_pnl_for_symbol %s: executions fallback pnl=%.4f", symbol, pnl)
+            return pnl
+    except Exception as exc:
+        logger.warning("get_closed_pnl_for_symbol %s: executions fallback failed: %s", symbol, exc)
+
+    logger.error("get_closed_pnl_for_symbol %s: all methods failed — PnL recorded as $0.00", symbol)
     return 0.0
 
 

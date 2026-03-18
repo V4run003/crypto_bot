@@ -317,8 +317,7 @@ def _on_position_closed(trade_info: dict):
     open_time = _trade_open_times.get(symbol)
     logger.info("Position closed (SL/TP/manual): %s", symbol)
     pnl = exchange.get_closed_pnl_for_symbol(symbol)
-    if pnl != 0:
-        risk.update_pnl(pnl)
+    risk.update_pnl(pnl)
     risk.record_trade_closed()
     risk.update_peak_balance()
     try:
