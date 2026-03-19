@@ -44,7 +44,7 @@ def trailing_dd_remaining() -> float:
                                    Fixed floor — matches 2-phase prop-firm rules.
     """
     current = _get_balance()
-    if getattr(config, "TRAILING_DD", True):
+    if getattr(config, "TRAILING_DD", False):  # default False = fixed floor (prop-firm mode)
         if _peak_balance <= 0:
             return 9999.0
         floor = _peak_balance * (1 - config.TRAILING_DD_PCT)

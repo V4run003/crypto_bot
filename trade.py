@@ -11,7 +11,7 @@ def calculate_qty(symbol, entry, sl, balance):
     Position sizing — three-layer safety model:
 
     1. Risk layer   : qty = RISK_PER_TRADE / SL_distance
-                      → max loss on a full stop-out = $25
+                      → max loss on a full stop-out = RISK_PER_TRADE ($50)
     2. Margin layer : qty capped so position notional ≤
                       balance × MAX_LEVERAGE × MAX_MARGIN_PCT
                       → never uses more than 20 % of the account as margin
