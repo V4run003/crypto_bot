@@ -416,7 +416,7 @@ def _check_signal(df5, i, df1h, h_idx, symbol, df1d=None, d_idx=-1, df4h=None, h
 
 # ── Walk-forward simulation ───────────────────────────────────────────────────
 
-def run_backtest(symbol, days, quiet=False):
+def run_backtest(symbol, days, quiet=False, include_fees=False):
     import exchange
 
     mode = "HYBRID" if config.RSI_STRATEGY else "WR-only"
@@ -606,6 +606,16 @@ def run_backtest(symbol, days, quiet=False):
             # Partial TP mode: pnl_usd was computed directly in the loop above
             rr_achvd = pnl_usd / config.RISK_PER_TRADE if config.RISK_PER_TRADE > 0 else 0
 
+        # Deduct round-trip trading fees (entry taker + exit taker).
+        # Notional = RISK_PER_TRADE / sl_pct  (since qty = risk/sl_dist and notional = qty * entry)
+        # Fee = notional * 2 * fee_rate
+        fee_rate = getattr(config, "TAKER_FEE_RATE", 0.0)
+        if include_fees and fee_rate > 0 and sl_dist > 0:
+            notional = config.RISK_PER_TRADE * (entry / sl_dist)
+            fee_cost = notional * 2 * fee_rate
+            pnl_usd -= fee_cost
+            rr_achvd = pnl_usd / config.RISK_PER_TRADE if config.RISK_PER_TRADE > 0 else rr_achvd
+
         if strat == "RSI":
             rsi_count += 1
         else:
@@ -714,4 +724,5 @@ if __name__ == "__main__":
     _symbol = sys.argv[1]              if len(sys.argv) > 1 else "BTCUSDT"
     _days   = int(sys.argv[2])         if len(sys.argv) > 2 else 90
     _quiet  = "--quiet" in sys.argv or "-q" in sys.argv
-    run_backtest(_symbol, _days, quiet=_quiet)
+    _fees   = "--fees"  in sys.argv
+    run_backtest(_symbol, _days, quiet=_quiet, include_fees=_fees)

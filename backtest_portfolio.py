@@ -79,7 +79,7 @@ def _load_coin(symbol, days, end_offset_days=0):
 
 # ── Portfolio simulation ───────────────────────────────────────────────────────
 
-def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, debug_sma=False):
+def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, debug_sma=False, include_fees=False):
     symbols = list(config.APPROVED_COINS)
 
     print(f"\n{'=' * 70}")
@@ -241,6 +241,14 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, deb
                     result, pnl, closed = "fade", fade_pnl, True
 
             if closed:
+                # Optional fee deduction: notional = qty * entry_px
+                # qty ≈ RISK_PER_TRADE / sl_dist; notional = RISK_PER_TRADE * entry_px / sl_dist
+                if include_fees and result != "breakeven":
+                    _sl_dist = abs(at["entry"] - at.get("orig_sl", at["sl"]))
+                    fee_rate = getattr(config, "TAKER_FEE_RATE", 0.0)
+                    if fee_rate > 0 and _sl_dist > 0:
+                        notional = config.RISK_PER_TRADE * (at["entry"] / _sl_dist)
+                        pnl -= notional * 2 * fee_rate
                 at["result"]   = result
                 at["pnl"]      = pnl
                 at["exit_ts"]  = ts
@@ -331,6 +339,7 @@ def run_portfolio(days, end_offset_days=0, coin_daily_cap=0, sma_only=False, deb
                 "strategy":  strat,
                 "entry":     entry,
                 "sl":        sl,
+                "orig_sl":   sl,   # preserved for fee calc even after BE move
                 "tp":        tp,
                 "open_ts":   ts,
                 "open_dt":   open_dt,
@@ -525,6 +534,7 @@ def main():
     no_sma          = "--no-sma"   in sys.argv
     sma_only        = "--sma-only" in sys.argv
     debug_sma       = "--debug-sma" in sys.argv
+    include_fees    = "--fees"      in sys.argv
     days            = int(args[0]) if len(args) > 0 else 180
     end_offset_days = int(args[1]) if len(args) > 1 else 0
     coin_daily_cap  = int(args[2]) if len(args) > 2 else 0
@@ -538,8 +548,11 @@ def main():
     if debug_sma and not sma_only and not getattr(config, "SMA_STRATEGY", False):
         config.SMA_STRATEGY = True
         print("  [--debug-sma] SMA_STRATEGY forced True for diagnostics\n")
+    if include_fees:
+        print("  [--fees] Round-trip taker fees deducted from PnL\n")
     all_trades, trades_per_day, cap_blocked_days = run_portfolio(
-        days, end_offset_days, coin_daily_cap, sma_only=sma_only, debug_sma=debug_sma)
+        days, end_offset_days, coin_daily_cap, sma_only=sma_only, debug_sma=debug_sma,
+        include_fees=include_fees)
     _print_report(all_trades, trades_per_day, cap_blocked_days, days)
 
 

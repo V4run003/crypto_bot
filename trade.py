@@ -21,8 +21,13 @@ def calculate_qty(symbol, entry, sl, balance):
     if sl_distance == 0:
         return None
 
-    # Layer 1 — risk-based
-    risk_qty = config.RISK_PER_TRADE / sl_distance
+    # Layer 1 — risk-based (fee-adjusted)
+    # Bake round-trip fees into the denominator so that when SL is hit,
+    # price_loss + entry_fee + exit_fee == RISK_PER_TRADE exactly.
+    # Formula: qty * (sl_dist + 2 * entry * fee_rate) == RISK_PER_TRADE
+    fee_rate  = getattr(config, "TAKER_FEE_RATE", 0.0)
+    fee_adj   = 2 * entry * fee_rate   # extra cost per coin for round-trip fees
+    risk_qty  = config.RISK_PER_TRADE / (sl_distance + fee_adj)
 
     # Layer 2 — margin cap
     max_notional     = balance * config.MAX_LEVERAGE * config.MAX_MARGIN_PCT
